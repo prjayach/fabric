@@ -21,46 +21,59 @@ package crypto
 
 import (
 	obcca "github.com/openblockchain/obc-peer/obc-ca/protos"
-	
-	"github.com/openblockchain/obc-peer/openchain/crypto/utils"
-	"golang.org/x/net/context"
-	"google.golang.org/grpc"
-	"github.com/golang/protobuf/proto"
-	"google/protobuf"
+
 	"crypto/ecdsa"
 	"crypto/rand"
 	"crypto/x509"
-	"time"
+	"github.com/golang/protobuf/proto"
+	"github.com/openblockchain/obc-peer/openchain/crypto/utils"
 	"github.com/openblockchain/obc-peer/openchain/util"
+	"golang.org/x/net/context"
+	"google.golang.org/grpc"
+	"google/protobuf"
+	"time"
 )
 
-func (node *nodeImpl) getTLSCertificateFromTLSCA(id, affiliation string) (interface{}, []byte, error) {
+func (node *nodeImpl) loadTLSCertificate() error {
+ 	node.log.Debug("Loading tls certificate...")
+ 
+ 	cert, _, err := node.ks.loadCertX509AndDer(node.conf.getTLSCertFilename())
+ 	if err != nil {
+ 		node.log.Error("Failed parsing tls certificate [%s].", err.Error())
+ 
+ 		return err
+ 	}
+ 	node.tlsCert = cert
+ 
+ 	return nil
+}
+
+func (node *nodeImpl) getTLSCertificateFromTLSCA(id, affiliation string) (interface{}, []byte, []byte, error) {
 	node.log.Info("getTLSCertificate...")
-	
+
 	priv, err := utils.NewECDSAKey()
 
 	if err != nil {
 		node.log.Error("Failed generating key: %s", err)
 
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
-	
+
 	uuid, err := util.GenerateUUID()
 	if err != nil {
 		node.log.Error("Failed generating uuid: %s", err)
 
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	// Prepare the request
 	pubraw, _ := x509.MarshalPKIXPublicKey(&priv.PublicKey)
 	now := time.Now()
 	timestamp := google_protobuf.Timestamp{int64(now.Second()), int32(now.Nanosecond())}
-	
+
 	req := &obcca.TLSCertCreateReq{
 		&timestamp,
 		&obcca.Identity{Id: id + "-" + uuid},
-		&obcca.Password{Pw: ""},
 		&obcca.PublicKey{
 			Type: obcca.CryptoType_ECDSA,
 			Key:  pubraw,
@@ -78,21 +91,21 @@ func (node *nodeImpl) getTLSCertificateFromTLSCA(id, affiliation string) (interf
 	if err != nil {
 		node.log.Error("Failed requesting tls certificate: %s", err)
 
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	node.log.Info("Verifing tls certificate...")
 
-	tlsCert, err := utils.DERToX509Certificate(pbCert.Cert)
+	tlsCert, err := utils.DERToX509Certificate(pbCert.Cert.Cert)
 	certPK := tlsCert.PublicKey.(*ecdsa.PublicKey)
 	utils.VerifySignCapability(priv, certPK)
 
 	node.log.Info("Verifing tls certificate...done!")
 
-	return priv, pbCert.Cert, nil
+	return priv, pbCert.Cert.Cert, pbCert.RootCert.Cert, nil
 }
 
-func (node *nodeImpl) callTLSCACreateCertificate(ctx context.Context, in *obcca.TLSCertCreateReq, opts ...grpc.CallOption) (*obcca.Cert, error) {
+func (node *nodeImpl) callTLSCACreateCertificate(ctx context.Context, in *obcca.TLSCertCreateReq, opts ...grpc.CallOption) (*obcca.TLSCertCreateResp, error) {
 	sockP, err := grpc.Dial(node.conf.getTLSCAPAddr(), grpc.WithInsecure())
 	if err != nil {
 		node.log.Error("Failed dialing in: %s", err)
@@ -103,12 +116,12 @@ func (node *nodeImpl) callTLSCACreateCertificate(ctx context.Context, in *obcca.
 
 	tlscaP := obcca.NewTLSCAPClient(sockP)
 
-	cert, err := tlscaP.CreateCertificate(context.Background(), in)
+	resp, err := tlscaP.CreateCertificate(context.Background(), in)
 	if err != nil {
 		node.log.Error("Failed requesting tls certificate: %s", err)
 
 		return nil, err
 	}
 
-	return cert, nil
+	return resp, nil
 }

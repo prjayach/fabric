@@ -47,6 +47,7 @@ import (
 	"github.com/openblockchain/obc-peer/openchain"
 	"github.com/openblockchain/obc-peer/openchain/chaincode"
 	"github.com/openblockchain/obc-peer/openchain/consensus/helper"
+	"github.com/openblockchain/obc-peer/openchain/crypto"
 	"github.com/openblockchain/obc-peer/openchain/ledger/genesis"
 	"github.com/openblockchain/obc-peer/openchain/peer"
 	"github.com/openblockchain/obc-peer/openchain/rest"
@@ -166,7 +167,6 @@ var chaincodeQueryCmd = &cobra.Command{
 }
 
 func main() {
-
 	runtime.GOMAXPROCS(2)
 
 	// For environment variables.
@@ -248,7 +248,6 @@ func main() {
 
 	mainCmd.AddCommand(chaincodeCmd)
 	mainCmd.Execute()
-
 }
 
 func createEventHubServer() (net.Listener, *grpc.Server, error) {
@@ -279,7 +278,6 @@ func createEventHubServer() (net.Listener, *grpc.Server, error) {
 }
 
 func serve(args []string) error {
-
 	peerEndpoint, err := peer.GetPeerEndpoint()
 	if err != nil {
 		logger.Error(fmt.Sprintf("Failed to get Peer Endpoint: %s", err))
@@ -295,21 +293,31 @@ func serve(args []string) error {
 
 	lis, err := net.Listen("tcp", listenAddr)
 	if err != nil {
-		grpclog.Fatalf("failed to listen: %v", err)
+		grpclog.Fatalf("Failed to listen: %v", err)
 	}
 
 	ehubLis, ehubGrpcServer, err := createEventHubServer()
 	if err != nil {
-		grpclog.Fatalf("failed to create ehub server: %v", err)
+		grpclog.Fatalf("Failed to create ehub server: %v", err)
 	}
 
 	if chaincodeDevMode {
-		logger.Info("Running in chaincode development mode. Set consensus to NOOPS and user starts chaincode")
+		logger.Info("Running in chaincode development mode")
+		logger.Info("Set consensus to NOOPS and user starts chaincode")
+		logger.Info("Disable loading validity system chaincode")
+
 		viper.Set("peer.validator.enabled", "true")
 		viper.Set("peer.validator.consensus", "noops")
 		viper.Set("chaincode.mode", chaincode.DevModeUserRunsChaincode)
+
+		// Disable validity system chaincode in dev mode. Also if security is enabled,
+		// in obcca.yaml, manually set pki.validity-period.update to false to prevent
+		// obcca from calling validity system chaincode -- though no harm otherwise
+		viper.Set("ledger.blockchain.deploy-system-chaincode", "false")
+		viper.Set("validator.validity-period.verification", "false")
 	}
 	logger.Info("Security enabled status: %t", viper.GetBool("security.enabled"))
+	logger.Info("Privacy enabled status: %t", viper.GetBool("security.privacy"))
 
 	var opts []grpc.ServerOption
 	if viper.GetBool("peer.tls.enabled") {
@@ -322,8 +330,6 @@ func serve(args []string) error {
 
 	grpcServer := grpc.NewServer(opts...)
 
-	// Register the Peer server
-	//pb.RegisterPeerServer(grpcServer, openchain.NewPeer())
 	var peerServer *peer.PeerImpl
 
 	if viper.GetBool("peer.validator.enabled") {
@@ -333,6 +339,9 @@ func serve(args []string) error {
 		logger.Debug("Running as non-validating peer")
 		peerServer, _ = peer.NewPeerWithHandler(peer.NewPeerHandler)
 	}
+
+	// Register the Peer server
+	//pb.RegisterPeerServer(grpcServer, openchain.NewPeer())
 	pb.RegisterPeerServer(grpcServer, peerServer)
 
 	// Register the Admin server
@@ -340,7 +349,15 @@ func serve(args []string) error {
 
 	// Register ChaincodeSupport server...
 	// TODO : not the "DefaultChain" ... we have to revisit when we do multichain
-	registerChaincodeSupport(chaincode.DefaultChain, grpcServer)
+	// The ChaincodeSupport needs security helper to encrypt/decrypt state when
+	// privacy is enabled
+	var secHelper crypto.Peer
+	if viper.GetBool("security.privacy") {
+		secHelper = peerServer.GetSecHelper()
+	} else {
+		secHelper = nil
+	}
+	registerChaincodeSupport(chaincode.DefaultChain, grpcServer, secHelper)
 
 	// Register Devops server
 	serverDevops := openchain.NewDevopsServer(peerServer)
@@ -355,8 +372,10 @@ func serve(args []string) error {
 
 	pb.RegisterOpenchainServer(grpcServer, serverOpenchain)
 
-	// Create and register the REST service
-	go rest.StartOpenchainRESTServer(serverOpenchain, serverDevops)
+	// Create and register the REST service if configured
+	if viper.GetBool("rest.enabled") {
+		go rest.StartOpenchainRESTServer(serverOpenchain, serverDevops)
+	}
 
 	rootNode, err := openchain.GetRootNode()
 	if err != nil {
@@ -371,15 +390,19 @@ func serve(args []string) error {
 	// genesis block if needed.
 	serve := make(chan bool)
 	go func() {
-		grpcServer.Serve(lis)
+		if grpcErr := grpcServer.Serve(lis); grpcErr != nil {
+			logger.Error(fmt.Sprintf("grpc server exited with error: %s", grpcErr))
+		} else {
+			logger.Info("grpc server exited")
+		}
 		serve <- true
 	}()
 
-	// Deploy the geneis block if needed.
+	// Deploy the genesis block if needed.
 	if viper.GetBool("peer.validator.enabled") {
-		makeGeneisError := genesis.MakeGenesis(peerServer.GetSecHelper())
-		if makeGeneisError != nil {
-			return makeGeneisError
+		makeGenesisError := genesis.MakeGenesis()
+		if makeGenesisError != nil {
+			return makeGenesisError
 		}
 	}
 
@@ -509,7 +532,7 @@ func getCliFilePath() string {
 	return localStore
 }
 
-func registerChaincodeSupport(chainname chaincode.ChainName, grpcServer *grpc.Server) {
+func registerChaincodeSupport(chainname chaincode.ChainName, grpcServer *grpc.Server, secHelper crypto.Peer) {
 	//get user mode
 	userRunsCC := false
 	if viper.GetString("chaincode.mode") == chaincode.DevModeUserRunsChaincode {
@@ -524,7 +547,7 @@ func registerChaincodeSupport(chainname chaincode.ChainName, grpcServer *grpc.Se
 	}
 	ccStartupTimeout := time.Duration(tOut) * time.Millisecond
 
-	pb.RegisterChaincodeSupportServer(grpcServer, chaincode.NewChaincodeSupport(chainname, peer.GetPeerEndpoint, userRunsCC, ccStartupTimeout))
+	pb.RegisterChaincodeSupportServer(grpcServer, chaincode.NewChaincodeSupport(chainname, peer.GetPeerEndpoint, userRunsCC, ccStartupTimeout, secHelper))
 }
 
 func checkChaincodeCmdParams(cmd *cobra.Command) error {
@@ -583,6 +606,7 @@ func chaincodeDeploy(cmd *cobra.Command, args []string) {
 
 	// If security is enabled, add client login token
 	if viper.GetBool("security.enabled") {
+		logger.Debug("Security is enabled. Include security context in deploy spec")
 		if chaincodeUsr == undefinedParamValue {
 			err := fmt.Sprintf("Error: must supply username for chaincode when security is enabled.\n")
 			cmd.Out().Write([]byte(err))
@@ -606,6 +630,12 @@ func chaincodeDeploy(cmd *cobra.Command, args []string) {
 
 			// Add the login token to the chaincodeSpec
 			spec.SecureContext = string(token)
+
+			// If privacy is enabled, mark chaincode as confidential
+			if viper.GetBool("security.privacy") {
+				logger.Info("Set confidentiality level to CONFIDENTIAL.\n")
+				spec.ConfidentialityLevel = pb.ConfidentialityLevel_CONFIDENTIAL
+			}
 		} else {
 			// Check if the token is not there and fail
 			if os.IsNotExist(err) {
@@ -615,11 +645,6 @@ func chaincodeDeploy(cmd *cobra.Command, args []string) {
 			// Unexpected error
 			panic(fmt.Errorf("Fatal error when checking for client login token: %s\n", err))
 		}
-	}
-
-	// If privacy is enabled, mark chaincode as confidential
-	if viper.GetBool("security.privacy") {
-		spec.ConfidentialityLevel = pb.ConfidentialityLevel_CONFIDENTIAL
 	}
 
 	chaincodeDeploymentSpec, err := devopsClient.Deploy(context.Background(), spec)
@@ -690,6 +715,12 @@ func chaincodeInvokeOrQuery(cmd *cobra.Command, args []string, invoke bool) {
 
 			// Add the login token to the chaincodeSpec
 			spec.SecureContext = string(token)
+
+			// If privacy is enabled, mark chaincode as confidential
+			if viper.GetBool("security.privacy") {
+				logger.Info("Set confidentiality level to CONFIDENTIAL.\n")
+				spec.ConfidentialityLevel = pb.ConfidentialityLevel_CONFIDENTIAL
+			}
 		} else {
 			// Check if the token is not there and fail
 			if os.IsNotExist(err) {
@@ -699,11 +730,6 @@ func chaincodeInvokeOrQuery(cmd *cobra.Command, args []string, invoke bool) {
 			// Unexpected error
 			panic(fmt.Errorf("Fatal error when checking for client login token: %s\n", err))
 		}
-	}
-
-	// If privacy is enabled, mark chaincode as confidential
-	if viper.GetBool("security.privacy") {
-		spec.ConfidentialityLevel = pb.ConfidentialityLevel_CONFIDENTIAL
 	}
 
 	// Build the ChaincodeInvocationSpec message

@@ -18,6 +18,11 @@ cli:
 ###############################################################################
 rest:
 
+    # Enable/disable setting for the REST service. It is recommended to disable
+    # REST service on validators in production deployment and use non-validating
+    # nodes to host REST service
+    enabled: true
+
     # The address that the REST service will listen on for incoming requests.
     address: 0.0.0.0:5000
 
@@ -92,17 +97,18 @@ peer:
                 # Channel size for readonly syncStateSnapshot messages channel for receiving state deltas for snapshot from oppositie Peer Endpoints.
                 # NOTE: currently messages are not stored and forwarded, but rather lost if the channel write blocks.
                 channelSize: 50
+            deltas:
+                # Channel size for readonly syncStateDeltas messages channel for receiving state deltas for a syncBlockRange from oppositie Peer Endpoints.
+                # NOTE: currently messages are not stored and forwarded, but rather lost if the channel write blocks.
+                channelSize: 5
 
     # Validator defines whether this peer is a validating peer or not, and if
     # it is enabled, what consensus plugin to load
     validator:
         enabled: true
 
-        # Consensus plugin to use. The value is the name of the plugin, e.g. pbft, noops
+        # Consensus plugin to use. The value is the name of the plugin, e.g. obcpbft, noops
         consensus: noops
-
-        # List of validating peers. For MVP, assume list is static.
-        replicas: 172.17.0.2:30303 172.17.0.3:30303 172.17.0.4:30303 172.17.0.5:30303
 
         events:
             # The address that the Event service will be enabled on the validator
@@ -116,6 +122,10 @@ peer:
             # if 0, if buffer full, will block and guarantee the event will be sent out
             # if > 0, if buffer full, blocks till timeout
             timeout: 10
+        # Setting the validity-period.verification to false will disable the verification
+        # of the validity period in the validator
+        validity-period:
+            verification: false
 
     # TLS Settings for p2p communications
     tls:
@@ -132,9 +142,9 @@ peer:
         eca:
             paddr: localhost:50051
         tca:
-            paddr: localhost:50551
+            paddr: localhost:50051
         tlsca:
-            paddr: localhost:50951
+            paddr: localhost:50051
 
     # Peer discovery settings.  Controls how this peer discovers other peers
     discovery:
@@ -181,30 +191,6 @@ peer:
     # Path on the file system where peer will store data
     fileSystemPath: /var/openchain/production
 
-### NOTE: The validator section below is not needed and will be removed - BN
-###############################################################################
-#
-#    Validator section
-#
-###############################################################################
-validator:
-    enabled: false
-    address: 0.0.0.0:30304
-    # TLS Settings for p2p communications
-    tls:
-        enabled:  false
-        cert:
-            file: testdata/server1.pem
-        key:
-            file: testdata/server1.key
-        # The server name use to verify the hostname returned by TLS handshake
-        server-host-override:
-    # Peer discovery settings.  Controls how this peer discovers other peers
-    discovery:
-
-        # The root nodes are used for bootstrapping purposes, and generally supplied through ENV variables
-        rootnode:
-
 ###############################################################################
 #
 #    VM section
@@ -215,8 +201,19 @@ vm:
     # Endpoint of the vm management system.  For docker can be one of the following in general
     # unix:///var/run/docker.sock
     # http://localhost:4243
+    # tcp://localhost:2376
     endpoint: unix:///var/run/docker.sock
 
+    # settings for docker vms
+    docker:
+        tls:
+            enabled: false
+            cert:
+                file: /path/to/server.pem
+            ca:
+                file: /path/to/ca.pem
+            key:
+                file: /path/to/server-key.pem
 
 ###############################################################################
 #
@@ -227,7 +224,7 @@ chaincode:
 
     # The id is used by the Chaincode stub to register the executing Chaincode ID with the Peerand is generally supplied through ENV variables
     # the Path form of ID is provided when deploying the chaincode. The name is used for all other requests. The name is really a hashcode
-    # returned by the system in response to the deploy transaction. In development mode where user runs the chaincode, the name can be 
+    # returned by the system in response to the deploy transaction. In development mode where user runs the chaincode, the name can be
     # any string
     id:
         path:
@@ -244,6 +241,9 @@ chaincode:
 
     #timeout in millisecs for starting up a container and waiting for Register to come through. 1sec should be plenty for chaincode unit tests
     startuptimeout: 1000
+
+    #timeout in millisecs for deploying chaincode from a remote repository.
+    deploytimeout: 30000
 
     #mode - options are "dev", "net"
     #dev - in dev mode, user runs the chaincode after starting validator from command line on local machine
@@ -278,6 +278,10 @@ ledger:
       #         - bob
       #         - "10"
 
+    # Setting the deploy-system-chaincode property to false will prevent the
+    # deploying of system chaincode at genesis time.
+    deploy-system-chaincode: false
+
   state:
 
     # Control the number state deltas that are maintained. This takes additional
@@ -291,7 +295,6 @@ ledger:
     # 'buckettree'. This CANNOT be changed after the DB has been created.
     dataStructure: buckettree
 
-
 ###############################################################################
 #
 #    Security section -
@@ -299,9 +302,11 @@ ledger:
 ###############################################################################
 security:
     enabled: false
-    # To enroll NVP or VP with Member Services PKI. These parameters are for
-    # 1 time use. They will not be valid the subsequent times without un-enroll
-    enrollID: nepumuk
-    enrollSecret: 9gvZQRwhUq9q
+    # To enroll NVP or VP with obc-ca. These parameters are for 1 time use.
+    # They will not be valid the subsequent times without un-enroll.
+    # The values come from off-line registration with obc-ca. For testing, make
+    # sure the values are in obc-ca/obcca.yaml file eca.users
+    enrollID: binhn
+    enrollSecret: 7avZQLwcUe9q
     # To enable privacy and confidentiality of transactions (requires security to be enabled)
     privacy: false

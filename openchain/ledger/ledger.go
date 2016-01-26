@@ -21,6 +21,7 @@ package ledger
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"reflect"
 	"sync"
@@ -37,6 +38,14 @@ import (
 )
 
 var ledgerLogger = logging.MustGetLogger("ledger")
+
+var (
+	// ErrOutOfBounds is returned if a request is out of bounds
+	ErrOutOfBounds = errors.New("ledger: out of bounds")
+
+	// ErrResourceNotFound is returned if a resource is not found
+	ErrResourceNotFound = errors.New("ledger: resource not found")
+)
 
 // Ledger - the struct for openchain ledger
 type Ledger struct {
@@ -86,7 +95,7 @@ func (ledger *Ledger) BeginTxBatch(id interface{}) error {
 // by a transaction between these two calls, the hash will be different. The
 // preview block does not include non-hashed data such as the local timestamp.
 func (ledger *Ledger) GetTXBatchPreviewBlock(id interface{},
-	transactions []*protos.Transaction, proof []byte) (*protos.Block, error) {
+	transactions []*protos.Transaction, metadata []byte) (*protos.Block, error) {
 	err := ledger.checkValidIDCommitORRollback(id)
 	if err != nil {
 		return nil, err
@@ -95,13 +104,13 @@ func (ledger *Ledger) GetTXBatchPreviewBlock(id interface{},
 	if err != nil {
 		return nil, err
 	}
-	return ledger.blockchain.buildBlock(protos.NewBlock("proposerID", transactions), stateHash), nil
+	return ledger.blockchain.buildBlock(protos.NewBlock(transactions, metadata), stateHash), nil
 }
 
 // CommitTxBatch - gets invoked when the current transaction-batch needs to be committed
 // This function returns successfully iff the transactions details and state changes (that
 // may have happened during execution of this transaction-batch) have been committed to permanent storage
-func (ledger *Ledger) CommitTxBatch(id interface{}, transactions []*protos.Transaction, proof []byte) error {
+func (ledger *Ledger) CommitTxBatch(id interface{}, transactions []*protos.Transaction, transactionResults []*protos.TransactionResult, metadata []byte) error {
 	err := ledger.checkValidIDCommitORRollback(id)
 	if err != nil {
 		return err
@@ -118,7 +127,8 @@ func (ledger *Ledger) CommitTxBatch(id interface{}, transactions []*protos.Trans
 	}
 
 	writeBatch := gorocksdb.NewWriteBatch()
-	block := protos.NewBlock("proposerID", transactions)
+	block := protos.NewBlock(transactions, metadata)
+	block.NonHashData = &protos.NonHashData{TransactionResults: transactionResults}
 	newBlockNumber, err := ledger.blockchain.addPersistenceChangesForNewBlock(context.TODO(), block, stateHash, writeBatch)
 	if err != nil {
 		success = false
@@ -181,6 +191,15 @@ func (ledger *Ledger) GetState(chaincodeID string, key string, committed bool) (
 	return ledger.state.Get(chaincodeID, key, committed)
 }
 
+// GetStateRangeScanIterator returns an iterator to get all the keys (and values) between startKey and endKey
+// (assuming lexical order of the keys) for a chaincodeID.
+// If committed is true, the key-values are retrived only from the db. If committed is false, the results from db
+// are mergerd with the results in memory (giving preference to in-memory data)
+// The key-values in the returned iterator are not guaranteed to be in any specific order
+func (ledger *Ledger) GetStateRangeScanIterator(chaincodeID string, startKey string, endKey string, committed bool) (statemgmt.RangeScanIterator, error) {
+	return ledger.state.GetRangeScanIterator(chaincodeID, startKey, endKey, committed)
+}
+
 // SetState sets state to given value for chaincodeID and key. Does not immideatly writes to DB
 func (ledger *Ledger) SetState(chaincodeID string, key string, value []byte) error {
 	return ledger.state.Set(chaincodeID, key, value)
@@ -208,7 +227,7 @@ func (ledger *Ledger) GetStateSnapshot() (*state.StateSnapshot, error) {
 // available.
 func (ledger *Ledger) GetStateDelta(blockNumber uint64) (*statemgmt.StateDelta, error) {
 	if blockNumber >= ledger.GetBlockchainSize() {
-		return nil, fmt.Errorf("Block number %d is out of range.", blockNumber)
+		return nil, ErrOutOfBounds
 	}
 	return ledger.state.FetchStateDeltaFromDB(blockNumber)
 }
@@ -283,7 +302,7 @@ func (ledger *Ledger) GetBlockchainInfo() (*protos.BlockchainInfo, error) {
 // Lowest block on chain is block number zero
 func (ledger *Ledger) GetBlockByNumber(blockNumber uint64) (*protos.Block, error) {
 	if blockNumber >= ledger.GetBlockchainSize() {
-		return nil, fmt.Errorf("Block number %d is out of bounds.", blockNumber)
+		return nil, ErrOutOfBounds
 	}
 	return ledger.blockchain.getBlock(blockNumber)
 }
@@ -322,10 +341,10 @@ func (ledger *Ledger) PutRawBlock(block *protos.Block, blockNumber uint64) error
 // you wish to verify the entire chain, use 0 for the genesis block.
 func (ledger *Ledger) VerifyChain(highBlock, lowBlock uint64) (uint64, error) {
 	if highBlock >= ledger.GetBlockchainSize() {
-		return highBlock, fmt.Errorf("Out of bounds error. The highBlock %d is greater than the blockchain size.", highBlock)
+		return highBlock, ErrOutOfBounds
 	}
 	if highBlock <= lowBlock {
-		return lowBlock, fmt.Errorf("highBlock %d must be greater than lowBlock. %d", highBlock, lowBlock)
+		return lowBlock, ErrOutOfBounds
 	}
 
 	for i := highBlock; i > lowBlock; i-- {

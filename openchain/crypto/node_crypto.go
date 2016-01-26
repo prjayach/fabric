@@ -18,8 +18,7 @@ func (node *nodeImpl) initCryptoEngine() error {
 	}
 
 	// Load enrollment secret key
-	// TODO: finalize encrypted pem support
-	if err := node.loadEnrollmentKey(nil); err != nil {
+	if err := node.loadEnrollmentKey(); err != nil {
 		return err
 	}
 
@@ -34,9 +33,14 @@ func (node *nodeImpl) initCryptoEngine() error {
 	}
 
 	// Load enrollment chain key
-	if err := node.loadEnrollmentChainKey(nil); err != nil {
+	if err := node.loadEnrollmentChainKey(); err != nil {
 		return err
 	}
+	
+	// Load tls certificate
+ 	if err := node.loadTLSCertificate(); err != nil {
+ 		return err
+ 	}
 
 	node.log.Info("Initializing node crypto engine...done!")
 
