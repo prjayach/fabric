@@ -42,7 +42,6 @@ import (
 	"github.com/openblockchain/obc-peer/openchain/chaincode"
 	"github.com/openblockchain/obc-peer/openchain/crypto"
 	"github.com/openblockchain/obc-peer/openchain/crypto/utils"
-	"github.com/openblockchain/obc-peer/openchain/peer"
 	pb "github.com/openblockchain/obc-peer/protos"
 )
 
@@ -158,19 +157,7 @@ func (s *ServerOpenchainREST) Register(rw web.ResponseWriter, req *web.Request) 
 	// User is not logged in, proceed with login
 	restLogger.Info("Logging in user '%s' on REST interface...\n", loginSpec.EnrollId)
 
-	// Get a devopsClient to perform the login
-	clientConn, err := peer.NewPeerClientConnection()
-	if err != nil {
-		rw.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprintf(rw, "{\"Error\": \"Error trying to connect to local peer: %s\"}", err)
-		restLogger.Error(fmt.Sprintf("Error trying to connect to local peer: %s", err))
-
-		return
-	}
-	devopsClient := pb.NewDevopsClient(clientConn)
-
-	// Perform the login
-	loginResult, err := devopsClient.Login(context.Background(), &loginSpec)
+	loginResult, err := s.devops.Login(context.Background(), &loginSpec)
 
 	// Check if login is successful
 	if loginResult.Status == pb.Response_SUCCESS {
@@ -716,7 +703,7 @@ func (s *ServerOpenchainREST) Invoke(rw web.ResponseWriter, req *web.Request) {
 	}
 
 	// Invoke the chainCode
-	_, err = s.devops.Invoke(context.Background(), &spec)
+	resp, err := s.devops.Invoke(context.Background(), &spec)
 	if err != nil {
 		// Replace " characters with '
 		errVal := strings.Replace(err.Error(), "\"", "'", -1)
@@ -728,9 +715,12 @@ func (s *ServerOpenchainREST) Invoke(rw web.ResponseWriter, req *web.Request) {
 		return
 	}
 
+	// Clients will need the txuuid in order to track it after invocation
+	txuuid := resp.Msg
+
 	rw.WriteHeader(http.StatusOK)
-	fmt.Fprintf(rw, "{\"OK\": \"Successfully invoked chainCode.\"}")
-	restLogger.Info("Successfuly invoked chainCode.\n")
+	fmt.Fprintf(rw, "{\"OK\": \"Successfully invoked chainCode.\",\"message\": \"%s\"}", string(txuuid))
+	restLogger.Info("Successfuly invoked chainCode with txuuid (%s)\n", string(txuuid))
 }
 
 // Query performs the requested query on the target Chaincode.
@@ -882,6 +872,25 @@ func (s *ServerOpenchainREST) Query(rw web.ResponseWriter, req *web.Request) {
 	}
 }
 
+// GetPeers returns a list of all peer nodes currently connected to the target peer.
+func (s *ServerOpenchainREST) GetPeers(rw web.ResponseWriter, req *web.Request) {
+	peers, err := s.server.GetPeers(context.Background(), &google_protobuf.Empty{})
+
+	encoder := json.NewEncoder(rw)
+
+	// Check for error
+	if err != nil {
+		// Failure
+		rw.WriteHeader(http.StatusBadRequest)
+		fmt.Fprintf(rw, "{\"Error\": \"%s\"}", err)
+		restLogger.Error(fmt.Sprintf("{\"Error\": \"Querying network peers -- %s\"}", err))
+	} else {
+		// Success
+		rw.WriteHeader(http.StatusOK)
+		encoder.Encode(peers)
+	}
+}
+
 // NotFound returns a custom landing page when a given openchain end point
 // had not been defined.
 func (s *ServerOpenchainREST) NotFound(rw web.ResponseWriter, r *web.Request) {
@@ -918,6 +927,8 @@ func StartOpenchainRESTServer(server *oc.ServerOpenchain, devops *oc.Devops) {
 	router.Post("/devops/query", (*ServerOpenchainREST).Query)
 
 	router.Get("/transactions/:uuid", (*ServerOpenchainREST).GetTransactionByUUID)
+
+	router.Get("/network/peers", (*ServerOpenchainREST).GetPeers)
 
 	// Add not found page
 	router.NotFound((*ServerOpenchainREST).NotFound)
