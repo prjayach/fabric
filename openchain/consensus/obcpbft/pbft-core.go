@@ -22,6 +22,7 @@ package obcpbft
 import (
 	"encoding/base64"
 	"fmt"
+	"math/rand"
 	"sort"
 	"sync"
 	"time"
@@ -72,21 +73,22 @@ type pbftCore struct {
 	notifyExec   *sync.Cond
 
 	// PBFT data
-	activeView   bool                   // view change happening
-	byzantine    bool                   // whether this node is intentionally acting as Byzantine; useful for debugging on the testnet
-	f            int                    // max. number of faults we can tolerate
-	N            int                    // max.number of validators in the network
-	h            uint64                 // low watermark
-	id           uint64                 // replica ID; PBFT `i`
-	K            uint64                 // checkpoint period
-	L            uint64                 // log size
-	lastExec     uint64                 // last request we executed
-	replicaCount int                    // number of replicas; PBFT `|R|`
-	seqNo        uint64                 // PBFT "n", strictly monotonic increasing sequence number
-	view         uint64                 // current view
-	chkpts       map[uint64]*blockState // state checkpoints; map lastExec to global hash
-	pset         map[uint64]*ViewChange_PQ
-	qset         map[qidx]*ViewChange_PQ
+	activeView    bool                   // view change happening
+	byzantine     bool                   // whether this node is intentionally acting as Byzantine; useful for debugging on the testnet
+	f             int                    // max. number of faults we can tolerate
+	N             int                    // max.number of validators in the network
+	h             uint64                 // low watermark
+	id            uint64                 // replica ID; PBFT `i`
+	K             uint64                 // checkpoint period
+	logMultiplier uint64                 // use this value to calculate log size : k*logMultiplier
+	L             uint64                 // log size
+	lastExec      uint64                 // last request we executed
+	replicaCount  int                    // number of replicas; PBFT `|R|`
+	seqNo         uint64                 // PBFT "n", strictly monotonic increasing sequence number
+	view          uint64                 // current view
+	chkpts        map[uint64]*blockState // state checkpoints; map lastExec to global hash
+	pset          map[uint64]*ViewChange_PQ
+	qset          map[qidx]*ViewChange_PQ
 
 	ledger  consensus.LedgerStack             // Used for blockchain related queries
 	hChkpts map[uint64]uint64                 // highest checkpoint sequence number observed for each replica
@@ -176,6 +178,7 @@ func newPbftCore(id uint64, config *viper.Viper, consumer innerStack, ledger con
 	}
 
 	instance.K = uint64(config.GetInt("general.K"))
+	instance.logMultiplier = uint64(config.GetInt("general.logmultiplier"))
 
 	instance.byzantine = config.GetBool("general.byzantine")
 
@@ -189,8 +192,18 @@ func newPbftCore(id uint64, config *viper.Viper, consumer innerStack, ledger con
 	}
 
 	instance.activeView = true
-	instance.L = 2 * instance.K // log size
+	instance.L = instance.logMultiplier * instance.K // log size
 	instance.replicaCount = instance.N
+
+	logger.Info("PBFT type = %T", instance.consumer)
+	logger.Info("PBFT Max number of validating peers (N) = %v", instance.N)
+	logger.Info("PBFT Max number of failing peers (f) = %v", instance.f)
+	logger.Info("PBFT byzantine flag = %v", instance.byzantine)
+	logger.Info("PBFT request timeout = %v", instance.requestTimeout)
+	logger.Info("PBFT view change timeout = %v", instance.newViewTimeout)
+	logger.Info("PBFT Checkpoint period (K) = %v", instance.K)
+	logger.Info("PBFT Log multiplier = %v", instance.logMultiplier)
+	logger.Info("PBFT log size (L) = %v", instance.L)
 
 	// init the logs
 	instance.certStore = make(map[msgID]*msgCert)
@@ -609,6 +622,25 @@ func (instance *pbftCore) recvRequest(req *Request) error {
 	return nil
 }
 
+func (instance *pbftCore) resubmitRequests() {
+	if instance.primary(instance.view) != instance.id {
+		return
+	}
+
+outer:
+	for d, req := range instance.outstandingReqs {
+		for _, cert := range instance.certStore {
+			if cert.prePrepare != nil && cert.prePrepare.RequestDigest == d {
+				continue outer
+			}
+		}
+
+		// This is a request that has not been pre-prepared yet
+		// Trigger request processing again.
+		instance.recvRequest(req)
+	}
+}
+
 func (instance *pbftCore) recvPrePrepare(preprep *PrePrepare) error {
 	logger.Debug("Replica %d received pre-prepare from replica %d for view=%d/seqNo=%d",
 		instance.id, preprep.ReplicaId, preprep.View, preprep.SequenceNumber)
@@ -651,6 +683,10 @@ func (instance *pbftCore) recvPrePrepare(preprep *PrePrepare) error {
 		instance.outstandingReqs[digest] = preprep.Request
 	}
 
+	if !instance.timerActive {
+		instance.startTimer(instance.requestTimeout)
+	}
+
 	if instance.primary(instance.view) != instance.id && instance.prePrepared(preprep.RequestDigest, preprep.View, preprep.SequenceNumber) && !cert.sentPrepare {
 		logger.Debug("Backup %d broadcasting prepare for view=%d/seqNo=%d",
 			instance.id, preprep.View, preprep.SequenceNumber)
@@ -660,12 +696,6 @@ func (instance *pbftCore) recvPrePrepare(preprep *PrePrepare) error {
 			SequenceNumber: preprep.SequenceNumber,
 			RequestDigest:  preprep.RequestDigest,
 			ReplicaId:      instance.id,
-		}
-
-		// TODO build this properly
-		// https://github.com/openblockchain/obc-peer/issues/217
-		if instance.byzantine {
-			prep.RequestDigest = "foo"
 		}
 
 		cert.sentPrepare = true
@@ -872,7 +902,10 @@ func (instance *pbftCore) moveWatermarks(h uint64) {
 		if idx.n <= h {
 			logger.Debug("Replica %d cleaning quorum certificate for view=%d/seqNo=%d",
 				instance.id, idx.v, idx.n)
-			delete(instance.reqStore, cert.prePrepare.RequestDigest)
+			if nil != cert.prePrepare {
+				// This block is always entered unless this is a 'fall behind' situation, in which case, requests were already cleared
+				delete(instance.reqStore, cert.prePrepare.RequestDigest)
+			}
 			delete(instance.certStore, idx)
 		}
 	}
@@ -907,6 +940,8 @@ func (instance *pbftCore) moveWatermarks(h uint64) {
 
 	logger.Debug("Replica %d updated low watermark to %d",
 		instance.id, instance.h)
+
+	instance.resubmitRequests()
 }
 
 func (instance *pbftCore) witnessCheckpoint(chkpt *Checkpoint) {
@@ -939,8 +974,9 @@ func (instance *pbftCore) witnessCheckpoint(chkpt *Checkpoint) {
 			// If f+1 nodes have issued checkpoints above our high water mark, then
 			// we will never record 2f+1 checkpoints for that sequence number, we are out of date
 			// (This is because all_replicas - missed - me = 3f+1 - f - 1 = 2f)
-			if m := chkptSeqNumArray[len(instance.hChkpts)-(instance.f+1)]; m > H {
+			if m := chkptSeqNumArray[len(chkptSeqNumArray)-(instance.f+1)]; m > H {
 				logger.Warning("Replica %d is out of date, f+1 nodes agree checkpoint with seqNo %d exists but our high water mark is %d", instance.id, chkpt.SequenceNumber, H)
+				instance.reqStore = make(map[string]*Request) // Discard all our requests, as we will never know which were executed, to be addressed in #394
 				instance.moveWatermarks(m)
 
 				furthestReplicaIds := make([]*protos.PeerID, instance.f+1)
@@ -1105,7 +1141,30 @@ func (instance *pbftCore) innerBroadcast(msg *Message, toSelf bool) error {
 	if err != nil {
 		return fmt.Errorf("[innerBroadcast] Cannot marshal message: %s", err)
 	}
-	instance.consumer.broadcast(msgRaw)
+
+	doByzantine := false
+	if instance.byzantine {
+		rand1 := rand.New(rand.NewSource(time.Now().UnixNano()))
+		doIt := rand1.Intn(3) // go byzantine about 1/3 of the time
+		if doIt == 1 {
+			doByzantine = true
+		}
+	}
+
+	// testing byzantine fault.
+	if doByzantine {
+		rand2 := rand.New(rand.NewSource(time.Now().UnixNano()))
+		ignoreidx := rand2.Intn(instance.N)
+		for i := 0; i < instance.N; i++ {
+			if i != ignoreidx && uint64(i) != instance.id { //Pick a random replica and do not send message
+				instance.consumer.unicast(msgRaw, uint64(i))
+			} else {
+				logger.Debug("PBFT byzantine: not broadcasting to replica %v", i)
+			}
+		}
+	} else {
+		instance.consumer.broadcast(msgRaw)
+	}
 
 	// We call ourselves synchronously, so that testing can run
 	// synchronous.

@@ -113,13 +113,13 @@ The available log levels in order of increasing verbosity are: *CRITICAL | ERROR
 See [specific logging control] (https://github.com/openblockchain/obc-docs/blob/master/dev-setup/logging-control.md) when running OBC.
 
 ## Generating grpc code
-If you modify ant .proto files, run the following command to generate new .pb.go files.
+If you modify any .proto files, run the following command to generate new .pb.go files.
 ```
 /openchain/obc-dev-env/compile_protos.sh
 ```
 
 ## Adding or updating a Go packages
-Openchain uses the [Go 1.5 Vendor Experiment](https://docs.google.com/document/d/1Bz5-UB7g2uPBdOx-rw5t9MxJwkfpx90cqG9AFL0JAYo/edit) for package management. This means that all required packages reside in the /vendor folder within the obc-peer project. This is enabled because the GO15VENDOREXPERIMENT environment variable is set to 1 in the Vagrant environment. Go will use packages in this folder instead of the GOPATH when `go install` or `go build` is run. To manage the packages in the /vendor folder, we use [Govendor](https://github.com/kardianos/govendor). This is installed in the Vagrant environment. The following commands can be used for package management.
+Openchain uses Go 1.6 vendoring for package management. This means that all required packages reside in the /vendor folder within the obc-peer project. Go will use packages in this folder instead of the GOPATH when `go install` or `go build` is run. To manage the packages in the /vendor folder, we use [Govendor](https://github.com/kardianos/govendor). This is installed in the Vagrant environment. The following commands can be used for package management.
 ```
 # Add external packages.
 govendor add +external
@@ -141,8 +141,7 @@ govendor list
 This is not recommended, however some users may wish to build Openchain outside of Vagrant if they use an editor with built in Go tooling. The instructions are
 
 1. Follow all steps required to setup and run a Vagrant image
-- Make you you have [Go 1.5.1](https://golang.org/) or later installed
-- Set the GO15VENDOREXPERIMENT environmental variable to 1. `export GO15VENDOREXPERIMENT=1`
+- Make you you have [Go 1.6](https://golang.org/) or later installed
 - Set the maximum number of open files to 10000 or greater for your OS
 - Install [RocksDB](https://github.com/facebook/rocksdb/blob/master/INSTALL.md) version 4.1
 - Run the following commands replacing `/opt/rocksdb` with the path where you installed RocksDB:
@@ -150,3 +149,10 @@ This is not recommended, however some users may wish to build Openchain outside 
 cd $GOPATH/src/github.com/openblockchain/obc-peer
 CGO_CFLAGS="-I/opt/rocksdb/include" CGO_LDFLAGS="-L/opt/rocksdb -lrocksdb -lstdc++ -lm -lz -lbz2 -lsnappy" go install
 ```
+- Make sure that the Docker daemon initialization includes the options
+```
+-H tcp://0.0.0.0:4243 -H unix:///var/run/docker.sock
+```
+- Be aware that the Docker bridge (the `OPENCHAIN_VM_ENDPOINT`) may not come
+up at the IP address currently assumed by the test environment
+(`172.17.0.1`). Use `ifconfig` or `ip addr` to find the docker bridge.

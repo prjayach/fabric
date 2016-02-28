@@ -2,7 +2,6 @@ obcca0:
   extends:
     file: compose-defaults.yml
     service: obcca
-  working_dir: /go/src/github.com/openblockchain/obc-peer/obc-ca
 
 vp0:
   extends:
@@ -14,6 +13,8 @@ vp0:
     - OPENCHAIN_SECURITY_ENROLLSECRET=MwYpmSRjupbT
   links:
     - obcca0
+  ports:
+    - 5000:5000
 
 vp1:
   extends:

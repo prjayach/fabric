@@ -250,6 +250,11 @@ func main() {
 
 	mainCmd.AddCommand(chaincodeCmd)
 
+	// Init the crypto layer
+	if err := crypto.Init(); err != nil {
+		panic(fmt.Errorf("Failed initializing the crypto layer [%s]%", err))
+	}
+
 	// On failure Cobra prints the usage message and error string, so we only
 	// need to exit with a non-0 status
 	if mainCmd.Execute() != nil {
@@ -341,10 +346,16 @@ func serve(args []string) error {
 
 	if viper.GetBool("peer.validator.enabled") {
 		logger.Debug("Running as validating peer - installing consensus %s", viper.GetString("peer.validator.consensus"))
-		peerServer, _ = peer.NewPeerWithHandler(helper.NewConsensusHandler)
+		peerServer, err = peer.NewPeerWithHandler(helper.NewConsensusHandler)
 	} else {
 		logger.Debug("Running as non-validating peer")
-		peerServer, _ = peer.NewPeerWithHandler(peer.NewPeerHandler)
+		peerServer, err = peer.NewPeerWithHandler(peer.NewPeerHandler)
+	}
+
+	if err != nil {
+		logger.Fatalf("Failed creating new peer with handler %v", err)
+
+		return err
 	}
 
 	// Register the Peer server

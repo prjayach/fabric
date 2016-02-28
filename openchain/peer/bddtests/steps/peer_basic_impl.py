@@ -1,6 +1,6 @@
 import os
 import re
-import time 
+import time
 import copy
 from datetime import datetime, timedelta
 
@@ -22,13 +22,13 @@ class ContainerData:
         for val in self.envFromInspect:
             if val.startswith(key):
                 envValue = val[len(key):]
-                break 
-        if envValue == None: 
+                break
+        if envValue == None:
             raise Exception("ENV key not found ({0}) for container ({1})".format(key, self.containerName))
         return envValue
 
 def parseComposeOutput(context):
-    """Parses the compose output results and set appropriate values into context"""
+    """Parses the compose output results and set appropriate values into context.  Merges existing with newly composed."""
     # Use the prefix to get the container name
     containerNamePrefix = os.path.basename(os.getcwd()) + "_"
     containerNames = []
@@ -39,7 +39,7 @@ def parseComposeOutput(context):
     print(containerNames)
     # Now get the Network Address for each name, and set the ContainerData onto the context.
     containerDataList = []
-    for containerName in containerNames: 
+    for containerName in containerNames:
     	output, error, returncode = \
         	bdd_test_util.cli_call(context, ["docker", "inspect", "--format",  "{{ .NetworkSettings.IPAddress }}", containerName], expect_success=True)
         #print("container {0} has address = {1}".format(containerName, output.splitlines()[0]))
@@ -56,9 +56,16 @@ def parseComposeOutput(context):
         labels = output.splitlines()[0][4:-1].split()
         dockerComposeService = [composeService[27:] for composeService in labels if composeService.startswith("com.docker.compose.service:")][0]
         print("dockerComposeService = {0}".format(dockerComposeService))
-        print("container {0} has env = {1}".format(containerName, env))        
+        print("container {0} has env = {1}".format(containerName, env))
         containerDataList.append(ContainerData(containerName, ipAddress, env, dockerComposeService))
-        setattr(context, "compose_containers", containerDataList)
+    # Now merge the new containerData info with existing
+    newContainerDataList = []
+    if "compose_containers" in context:
+        # Need to merge I new list
+        newContainerDataList = context.compose_containers
+    newContainerDataList = newContainerDataList + containerDataList
+
+    setattr(context, "compose_containers", newContainerDataList)
     print("")
 
 def ipFromContainerNamePart(namePart, containerDataList):
@@ -79,7 +86,7 @@ def buildUrl(ipAddress, path):
 def step_impl(context, composeYamlFile):
 	# Use the uninstalled version of `cf active-deploy` rather than the installed version on the OS $PATH
     #cmd = os.path.dirname(os.path.abspath(__file__)) + "/../../../cf_update/v1/cf_update.py"
-    
+
     # Expand $vars, e.g. "--path $PATH" becomes "--path /bin"
     #args = re.sub('\$\w+', lambda v: os.getenv(v.group(0)[1:]), composeYamlFile)
     context.compose_yaml = composeYamlFile
@@ -95,7 +102,7 @@ def step_impl(context, path, containerName):
     print("Requesting path = {0}".format(request_url))
     resp = requests.get(request_url, headers={'Accept': 'application/json'})
     assert resp.status_code == 200, "Failed to GET url %s:  %s" % (request_url,resp.text)
-    context.response = resp  
+    context.response = resp
     print("")
 
 @then(u'I should get a JSON response with "{attribute}" = "{expectedValue}"')
@@ -146,7 +153,7 @@ def step_impl(context, chaincodePath, ctor, containerName):
         chaincodeSpec["secureContext"] = context.userName
 
     resp = requests.post(request_url, headers={'Content-type': 'application/json'}, data=json.dumps(chaincodeSpec))
-    assert resp.status_code == 200, "Failed to POST to %s:  %s" %(request_url, resp.text)   
+    assert resp.status_code == 200, "Failed to POST to %s:  %s" %(request_url, resp.text)
     context.response = resp
     chaincodeName = resp.json()['message']
     chaincodeSpec['chaincodeID']['name'] = chaincodeName
@@ -163,33 +170,16 @@ def step_impl(context):
     else:
         fail('chaincodeSpec not in context')
 
+@when(u'I invoke chaincode "{chaincodeName}" function name "{functionName}" on "{containerName}" "{times}" times')
+def step_impl(context, chaincodeName, functionName, containerName, times):
+    assert 'chaincodeSpec' in context, "chaincodeSpec not found in context"
+    for i in range(int(times)):
+        invokeChaincode(context, functionName, containerName)
+
 @when(u'I invoke chaincode "{chaincodeName}" function name "{functionName}" on "{containerName}"')
 def step_impl(context, chaincodeName, functionName, containerName):
     assert 'chaincodeSpec' in context, "chaincodeSpec not found in context"
-    # Update hte chaincodeSpec ctorMsg for invoke
-    args = []
-    if 'table' in context:
-       # There is ctor arguments
-       args = context.table[0].cells
-    context.chaincodeSpec['ctorMsg']['function'] = functionName
-    context.chaincodeSpec['ctorMsg']['args'] = args
-    # Invoke the POST
-    chaincodeInvocationSpec = {
-        "chaincodeSpec" : context.chaincodeSpec
-    }
-    ipAddress = ipFromContainerNamePart(containerName, context.compose_containers)
-    request_url = buildUrl(ipAddress, "/devops/invoke")
-    print("POSTing path = {0}".format(request_url))
-
-    resp = requests.post(request_url, headers={'Content-type': 'application/json'}, data=json.dumps(chaincodeInvocationSpec))
-    assert resp.status_code == 200, "Failed to POST to %s:  %s" %(request_url, resp.text)   
-    context.response = resp
-    print(json.dumps(resp.json(), indent = 4))
-    print("RESULT from invokde o fchaincode ")
-    print("RESULT from invokde o fchaincode ")
-    # TODO: Put these back in once TX id is available in message field of JSON response for invoke.
-    transactionID = resp.json()['message']
-    context.transactionID = transactionID
+    invokeChaincode(context, functionName, containerName)
 
 @then(u'I should have received a transactionID')
 def step_impl(context):
@@ -200,9 +190,6 @@ def step_impl(context):
 @when(u'I query chaincode "{chaincodeName}" function name "{functionName}" on "{containerName}"')
 def step_impl(context, chaincodeName, functionName, containerName):
     invokeChaincode(context, "query", containerName)
-    print(json.dumps(context.response.json(), indent = 4))
-    print("")
-    #raise NotImplementedError(u'STEP: When I query chaincode "example2" function name "query" with "a" on "vp0":')
 
 def invokeChaincode(context, functionName, containerName):
     assert 'chaincodeSpec' in context, "chaincodeSpec not found in context"
@@ -222,8 +209,13 @@ def invokeChaincode(context, functionName, containerName):
     print("POSTing path = {0}".format(request_url))
 
     resp = requests.post(request_url, headers={'Content-type': 'application/json'}, data=json.dumps(chaincodeInvocationSpec))
-    assert resp.status_code == 200, "Failed to POST to %s:  %s" %(request_url, resp.text)   
+    assert resp.status_code == 200, "Failed to POST to %s:  %s" %(request_url, resp.text)
     context.response = resp
+    print("RESULT from {0} of chaincode from peer {1}".format(functionName, containerName))
+    print(json.dumps(context.response.json(), indent = 4))
+    if 'message' in resp.json():
+        transactionID = context.response.json()['message']
+        context.transactionID = transactionID
 
 @then(u'I wait "{seconds}" seconds for chaincode to build')
 def step_impl(context, seconds):
@@ -243,7 +235,7 @@ def step_impl(context, seconds, containerName):
     print("GETing path = {0}".format(request_url))
 
     resp = requests.get(request_url, headers={'Accept': 'application/json'})
-    assert resp.status_code == 200, "Failed to POST to %s:  %s" %(request_url, resp.text)   
+    assert resp.status_code == 200, "Failed to POST to %s:  %s" %(request_url, resp.text)
     context.response = resp
 
 def multiRequest(context, seconds, containerDataList, pathBuilderFunc):
@@ -260,10 +252,10 @@ def multiRequest(context, seconds, containerDataList, pathBuilderFunc):
         while (datetime.now() < maxTime):
             print("GETing path = {0}".format(request_url))
             resp = requests.get(request_url, headers={'Accept': 'application/json'})
-            respMap[container.containerName] = resp 
+            respMap[container.containerName] = resp
         else:
             raise Exception("Max time exceeded waiting for multiRequest with current response map = {0}".format(respMap))
-    
+
 @then(u'I wait up to "{seconds}" seconds for transaction to be committed to all peers')
 def step_impl(context, seconds):
     assert 'transactionID' in context, "transactionID not found in context"
@@ -303,7 +295,7 @@ def getContainerDataValuesFromContext(context, aliases, callback):
     assert 'compose_containers' in context, "compose_containers not found in context"
     values = []
     containerNamePrefix = os.path.basename(os.getcwd()) + "_"
-    for namePart in aliases:    
+    for namePart in aliases:
         for containerData in context.compose_containers:
             if containerData.containerName.startswith(containerNamePrefix + namePart):
                 values.append(callback(containerData))
@@ -371,7 +363,7 @@ def step_impl(context, chaincodeName, functionName):
         request_url = buildUrl(container.ipAddress, "/devops/{0}".format(functionName))
         print("POSTing path = {0}".format(request_url))
         resp = requests.post(request_url, headers={'Content-type': 'application/json'}, data=json.dumps(chaincodeInvocationSpec))
-        assert resp.status_code == 200, "Failed to POST to %s:  %s" %(request_url, resp.text)   
+        assert resp.status_code == 200, "Failed to POST to %s:  %s" %(request_url, resp.text)
         responses.append(resp)
     context.responses = responses
 
@@ -388,7 +380,7 @@ def step_impl(context, chaincodeName, functionName, value):
 
     # Update the chaincodeSpec ctorMsg for invoke
     context.chaincodeSpec['ctorMsg']['function'] = functionName
-    context.chaincodeSpec['ctorMsg']['args'] = [value] 
+    context.chaincodeSpec['ctorMsg']['args'] = [value]
     # Invoke the POST
     # Make deep copy of chaincodeSpec as we will be changing the SecurityContext per call.
     chaincodeInvocationSpec = {
@@ -401,8 +393,10 @@ def step_impl(context, chaincodeName, functionName, value):
         print("Container {0} enrollID = {1}".format(container.containerName, container.getEnv("OPENCHAIN_SECURITY_ENROLLID")))
         request_url = buildUrl(container.ipAddress, "/devops/{0}".format(functionName))
         print("POSTing path = {0}".format(request_url))
-        resp = requests.post(request_url, headers={'Content-type': 'application/json'}, data=json.dumps(chaincodeInvocationSpec))
-        assert resp.status_code == 200, "Failed to POST to %s:  %s" %(request_url, resp.text)   
+        resp = requests.post(request_url, headers={'Content-type': 'application/json'}, data=json.dumps(chaincodeInvocationSpec), timeout=3)
+        assert resp.status_code == 200, "Failed to POST to %s:  %s" %(request_url, resp.text)
+        print("RESULT from {0} of chaincode from peer {1}".format(functionName, container.containerName))
+        print(json.dumps(resp.json(), indent = 4))
         responses.append(resp)
     context.responses = responses
 
@@ -433,7 +427,7 @@ def step_impl(context, userName, secret):
     assert 'compose_containers' in context, "compose_containers not found in context"
     assert 'table' in context, "table (of peers) not found in context"
 
-    # Get list of IPs to login to 
+    # Get list of IPs to login to
     aliases =  context.table.headings
     ipAddressList = getContainerDataValuesFromContext(context, aliases, lambda containerData: containerData.ipAddress)
 
@@ -443,22 +437,26 @@ def step_impl(context, userName, secret):
     }
 
     # Login to each container specified
-    for ipAddress in ipAddressList:    
+    for ipAddress in ipAddressList:
         request_url = buildUrl(ipAddress, "/registrar")
         print("POSTing path = {0}".format(request_url))
 
         resp = requests.post(request_url, headers={'Content-type': 'application/json'}, data=json.dumps(secretMsg))
-        assert resp.status_code == 200, "Failed to POST to %s:  %s" %(request_url, resp.text)   
+        assert resp.status_code == 200, "Failed to POST to %s:  %s" %(request_url, resp.text)
         context.response = resp
         print("message = {0}".format(resp.json()))
     # Store the username in the context
     context.userName = userName
+    # if we already have the chaincodeSpec, change secureContext
+    if 'chaincodeSpec' in context:
+        context.chaincodeSpec["secureContext"] = context.userName
+
 
 @given(u'I use the following credentials for querying peers')
 def step_impl(context):
     assert 'compose_containers' in context, "compose_containers not found in context"
     assert 'table' in context, "table (of peers, username, secret) not found in context"
-    
+
     peerToSecretMessage = {}
 
     # Login to each container specified using username and secret
@@ -471,11 +469,42 @@ def step_impl(context):
 
         ipAddress = ipFromContainerNamePart(peer, context.compose_containers)
         request_url = buildUrl(ipAddress, "/registrar")
-        print("POSTing path = {0}".format(request_url))
+        print("POSTing to service = {0}, path = {1}".format(peer, request_url))
 
         resp = requests.post(request_url, headers={'Content-type': 'application/json'}, data=json.dumps(secretMsg))
-        assert resp.status_code == 200, "Failed to POST to %s:  %s" %(request_url, resp.text)   
+        assert resp.status_code == 200, "Failed to POST to %s:  %s" %(request_url, resp.text)
         context.response = resp
         print("message = {0}".format(resp.json()))
         peerToSecretMessage[peer] = secretMsg
     context.peerToSecretMessage = peerToSecretMessage
+
+
+@given(u'I stop peers')
+def step_impl(context):
+    assert 'table' in context, "table (of peers) not found in context"
+    assert 'compose_yaml' in context, "compose_yaml not found in context"
+    assert 'compose_containers' in context, "compose_containers not found in context"
+
+    services =  context.table.headings
+    # Loop through services and stop them, and remove from the container data list if stopped successfully.
+    for service in services:
+       context.compose_output, context.compose_error, context.compose_returncode = \
+           bdd_test_util.cli_call(context, ["docker-compose", "-f", context.compose_yaml, "stop", service], expect_success=True)
+       assert context.compose_returncode == 0, "docker-compose failed to stop {0}".format(service)
+       #remove from the containerDataList
+       context.compose_containers = [containerData for  containerData in context.compose_containers if containerData.composeService != service]
+    print("After stopping, the container serive list is = {0}".format([containerData.composeService for  containerData in context.compose_containers]))
+
+@given(u'I start peers')
+def step_impl(context):
+    assert 'table' in context, "table (of peers) not found in context"
+    assert 'compose_yaml' in context, "compose_yaml not found in context"
+
+    services =  context.table.headings
+    # Loop through services and start them
+    for service in services:
+       context.compose_output, context.compose_error, context.compose_returncode = \
+           bdd_test_util.cli_call(context, ["docker-compose", "-f", context.compose_yaml, "start", service], expect_success=True)
+       assert context.compose_returncode == 0, "docker-compose failed to start {0}".format(service)
+       parseComposeOutput(context)
+    print("After starting peers, the container service list is = {0}".format([containerData.composeService + ":" + containerData.ipAddress for  containerData in context.compose_containers]))

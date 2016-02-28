@@ -61,6 +61,7 @@ logging:
     #   warning:main,db=debug:chaincode=info       - Override default WARNING in main,db,chaincode
     #   chaincode=info:main=debug:db=debug:warning - Same as above
     peer:      info
+    crypto:    info
     status:    warning
     stop:      warning
     login:     warning
@@ -91,8 +92,7 @@ peer:
     networkId: dev
 
     Dockerfile:  |
-        from golang:1.5.1
-        ENV GO15VENDOREXPERIMENT=1
+        from golang:1.6
         # Install RocksDB
         RUN cd /opt  && git clone --branch v4.1 --single-branch --depth 1 https://github.com/facebook/rocksdb.git && cd rocksdb
         WORKDIR /opt/rocksdb
@@ -126,7 +126,7 @@ peer:
             # blocks from oppositie Peer Endpoints.
             # NOTE: currently messages are not stored and forwarded, but rather
             # lost if the channel write blocks.
-            channelSize: 1
+            channelSize: 10
         state:
             snapshot:
                 # Channel size for readonly syncStateSnapshot messages channel
@@ -140,7 +140,7 @@ peer:
                 # Peer Endpoints.
                 # NOTE: currently messages are not stored and forwarded,
                 # but rather lost if the channel write blocks.
-                channelSize: 5
+                channelSize: 20
 
     # Validator defines whether this peer is a validating peer or not, and if
     # it is enabled, what consensus plugin to load
@@ -148,6 +148,7 @@ peer:
         enabled: true
 
         # Consensus plugin to use. The value is the name of the plugin, e.g. obcpbft, noops
+        # if the given value is not recognized, we will default to noops
         consensus: noops
 
         events:
@@ -285,8 +286,7 @@ chaincode:
         # This is the basis for the Golang Dockerfile.  Additional commands will
         # be appended depedendent upon the chaincode specification.
         Dockerfile:  |
-            from golang:1.5.1
-            ENV GO15VENDOREXPERIMENT=1
+            from golang:1.6
             COPY src $GOPATH/src
             WORKDIR $GOPATH
 
@@ -384,3 +384,13 @@ security:
     # encrypts the transaction content during transit and at rest. The state
     # data is also encrypted
     privacy: false
+
+    # Can be 256 or 384. If you change here, you have to change also
+    # the same property in obcca.yaml to the same value
+    level: 256
+
+    # TCerts related configuration
+    tcert:
+      batch:
+        # The size of the batch of TCerts
+        size:  200

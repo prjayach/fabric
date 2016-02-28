@@ -34,7 +34,7 @@ import (
 
 // Handler peer handler implementation.
 type Handler struct {
-	chatMutex	               sync.Mutex
+	chatMutex                     sync.Mutex
 	ToPeerEndpoint                *pb.PeerEndpoint
 	Coordinator                   MessageHandlerCoordinator
 	ChatStream                    ChatStream
@@ -407,7 +407,8 @@ func (d *Handler) beforeSyncBlocks(e *fsm.Event) {
 		e.Cancel(fmt.Errorf("Error unmarshalling SyncBlocks in beforeSyncBlocks: %s", err))
 		return
 	}
-	peerLogger.Debug("TODO: send received syncBlocks for start = %d and end = %d message to channel", syncBlocks.Range.Start, syncBlocks.Range.End)
+
+	peerLogger.Debug("Sending block onto channel for start = %d and end = %d", syncBlocks.Range.Start, syncBlocks.Range.End)
 
 	// Send the message onto the channel, allow for the fact that channel may be closed on send attempt.
 	defer func() {
@@ -429,7 +430,8 @@ func (d *Handler) sendBlocks(syncBlockRange *pb.SyncBlockRange) {
 	var blockNums []uint64
 	if syncBlockRange.Start > syncBlockRange.End {
 		// Send in reverse order
-		for i := syncBlockRange.Start; i >= syncBlockRange.End; i-- {
+		// note that i is a uint so decrementing i below 0 results in an underflow (i becomes uint.MaxValue). Always stop after i == 0
+		for i := syncBlockRange.Start; i >= syncBlockRange.End && i <= syncBlockRange.Start; i-- {
 			blockNums = append(blockNums, i)
 		}
 	} else {
@@ -562,11 +564,11 @@ func (d *Handler) sendStateSnapshot(syncStateSnapshotRequest *pb.SyncStateSnapsh
 	defer snapshot.Release()
 
 	// Iterate over the state deltas and send to requestor
-	delta := statemgmt.NewStateDelta()
 	currBlockNumber := snapshot.GetBlockNumber()
 	var sequence uint64
 	// Loop through and send the Deltas
 	for i := 0; snapshot.Next(); i++ {
+		delta := statemgmt.NewStateDelta()
 		k, v := snapshot.GetRawKeyValue()
 		cID, kID := statemgmt.DecodeCompositeKey(k)
 		delta.Set(cID, kID, v, nil)
@@ -703,7 +705,7 @@ func (d *Handler) beforeSyncStateDeltas(e *fsm.Event) {
 		e.Cancel(fmt.Errorf("Error unmarshalling SyncStateDeltas in beforeSyncStateDeltas: %s", err))
 		return
 	}
-	peerLogger.Debug("TODO: send received syncBlocks for start = %d and end = %d message to channel", syncStateDeltas.Range.Start, syncStateDeltas.Range.End)
+	peerLogger.Debug("Sending state delta onto channel for start = %d and end = %d", syncStateDeltas.Range.Start, syncStateDeltas.Range.End)
 
 	// Send the message onto the channel, allow for the fact that channel may be closed on send attempt.
 	defer func() {
