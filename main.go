@@ -64,7 +64,7 @@ const undefinedParamValue = ""
 // The main command describes the service and
 // defaults to printing the help message.
 var mainCmd = &cobra.Command{
-	Use: cmdRoot,
+	Use: "obc-peer",
 }
 
 var peerCmd = &cobra.Command{
@@ -130,6 +130,18 @@ var vmPrimeCmd = &cobra.Command{
 	Long:  `Primes the VM functionality of openchain by preparing the necessary VM construction artifacts.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return stop()
+	},
+}
+
+var networkCmd = &cobra.Command{
+	Use:   "network",
+	Short: "List of network peers.",
+	Long:  `Show a list of all existing network connections for the target peer node, includes both validating and non-validating peers.`,
+	PersistentPreRun: func(cmd *cobra.Command, args []string) {
+		openchain.LoggingInit("network")
+	},
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return network()
 	},
 }
 
@@ -234,6 +246,8 @@ func main() {
 
 	vmCmd.AddCommand(vmPrimeCmd)
 	mainCmd.AddCommand(vmCmd)
+
+	mainCmd.AddCommand(networkCmd)
 
 	chaincodeCmd.PersistentFlags().StringVarP(&chaincodeLang, "lang", "l", "golang", fmt.Sprintf("Language the %s is written in", chainFuncName))
 	chaincodeCmd.PersistentFlags().StringVarP(&chaincodeCtorJSON, "ctor", "c", "{}", fmt.Sprintf("Constructor message for the %s in JSON format", chainFuncName))
@@ -611,6 +625,9 @@ func checkChaincodeCmdParams(cmd *cobra.Command) (err error) {
 				return
 			}
 		}
+	} else {
+		err = fmt.Errorf("Empty JSON chaincode parameters must contain exactly 2 keys - 'Function' and 'Args'")
+		return
 	}
 
 	return
@@ -643,7 +660,8 @@ func chaincodeDeploy(cmd *cobra.Command, args []string) (err error) {
 		err = fmt.Errorf("Chaincode argument error: %s", err)
 		return
 	}
-	spec := &pb.ChaincodeSpec{Type: pb.ChaincodeSpec_GOLANG,
+	chaincodeLang = strings.ToUpper(chaincodeLang)
+	spec := &pb.ChaincodeSpec{Type: pb.ChaincodeSpec_Type(pb.ChaincodeSpec_Type_value[chaincodeLang]),
 		ChaincodeID: &pb.ChaincodeID{Path: chaincodePath, Name: chaincodeName}, CtorMsg: input}
 
 	// If security is enabled, add client login token
@@ -733,7 +751,8 @@ func chaincodeInvokeOrQuery(cmd *cobra.Command, args []string, invoke bool) (err
 		err = fmt.Errorf("Chaincode argument error: %s", err)
 		return
 	}
-	spec := &pb.ChaincodeSpec{Type: pb.ChaincodeSpec_GOLANG,
+	chaincodeLang = strings.ToUpper(chaincodeLang)
+	spec := &pb.ChaincodeSpec{Type: pb.ChaincodeSpec_Type(pb.ChaincodeSpec_Type_value[chaincodeLang]),
 		ChaincodeID: &pb.ChaincodeID{Name: chaincodeName}, CtorMsg: input}
 
 	// If security is enabled, add client login token
@@ -816,5 +835,26 @@ func chaincodeInvokeOrQuery(cmd *cobra.Command, args []string, invoke bool) (err
 			}
 		}
 	}
+	return nil
+}
+
+// Show a list of all existing network connections for the target peer node,
+// includes both validating and non-validating peers
+func network() (err error) {
+	clientConn, err := peer.NewPeerClientConnection()
+	if err != nil {
+		err = fmt.Errorf("Error trying to connect to local peer:", err)
+		return
+	}
+	openchainClient := pb.NewOpenchainClient(clientConn)
+	peers, err := openchainClient.GetPeers(context.Background(), &google_protobuf.Empty{})
+
+	if err != nil {
+		err = fmt.Errorf("Error trying to get peers:", err)
+		return
+	}
+
+	jsonOutput, _ := json.Marshal(peers)
+	fmt.Println(string(jsonOutput))
 	return nil
 }

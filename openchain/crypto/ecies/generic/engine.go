@@ -25,13 +25,13 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/hmac"
-	rand "crypto/rand"
+	"crypto/rand"
 	"errors"
 	"io"
 
 	"crypto/subtle"
+	"github.com/openblockchain/obc-peer/openchain/crypto/conf"
 	"golang.org/x/crypto/hkdf"
-	"golang.org/x/crypto/sha3"
 )
 
 func aesEncrypt(key, plain []byte) ([]byte, error) {
@@ -74,7 +74,7 @@ func eciesGenerateKey(rand io.Reader, curve elliptic.Curve, params *Params) (*ec
 }
 
 func eciesEncrypt(rand io.Reader, pub *ecdsa.PublicKey, s1, s2 []byte, plain []byte) ([]byte, error) {
-	params := pub.Curve.Params()
+	params := pub.Curve
 
 	// Select an ephemeral elliptic curve key pair associated with
 	// elliptic curve domain parameters params
@@ -96,7 +96,7 @@ func eciesEncrypt(rand io.Reader, pub *ecdsa.PublicKey, s1, s2 []byte, plain []b
 	// ans s1
 	kE := make([]byte, 32)
 	kM := make([]byte, 32)
-	hkdf := hkdf.New(sha3.New384, Z, s1, nil)
+	hkdf := hkdf.New(conf.GetDefaultHash(), Z, s1, nil)
 	_, err = hkdf.Read(kE)
 	if err != nil {
 		return nil, err
@@ -112,7 +112,7 @@ func eciesEncrypt(rand io.Reader, pub *ecdsa.PublicKey, s1, s2 []byte, plain []b
 
 	// Use the tagging operation of the MAC scheme to compute
 	// the tag D on EM || s2
-	mac := hmac.New(sha3.New384, kM)
+	mac := hmac.New(conf.GetDefaultHash(), kM)
 	mac.Write(EM)
 	if len(s2) > 0 {
 		mac.Write(s2)
@@ -132,11 +132,11 @@ func eciesEncrypt(rand io.Reader, pub *ecdsa.PublicKey, s1, s2 []byte, plain []b
 }
 
 func eciesDecrypt(priv *ecdsa.PrivateKey, s1, s2 []byte, ciphertext []byte) ([]byte, error) {
-	params := priv.Curve.Params()
+	params := priv.Curve
 
 	var (
 		rLen   int
-		hLen   int = sha3.New384().Size()
+		hLen   int = conf.GetDefaultHash()().Size()
 		mStart int
 		mEnd   int
 	)
@@ -184,7 +184,7 @@ func eciesDecrypt(priv *ecdsa.PrivateKey, s1, s2 []byte, ciphertext []byte) ([]b
 	// ans s1
 	kE := make([]byte, 32)
 	kM := make([]byte, 32)
-	hkdf := hkdf.New(sha3.New384, Z, s1, nil)
+	hkdf := hkdf.New(conf.GetDefaultHash(), Z, s1, nil)
 	_, err := hkdf.Read(kE)
 	if err != nil {
 		return nil, err
@@ -196,7 +196,7 @@ func eciesDecrypt(priv *ecdsa.PrivateKey, s1, s2 []byte, ciphertext []byte) ([]b
 
 	// Use the tagging operation of the MAC scheme to compute
 	// the tag D on EM || s2 and then compare
-	mac := hmac.New(sha3.New384, kM)
+	mac := hmac.New(conf.GetDefaultHash(), kM)
 	mac.Write(ciphertext[mStart:mEnd])
 	if len(s2) > 0 {
 		mac.Write(s2)

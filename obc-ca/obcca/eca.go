@@ -77,7 +77,6 @@ type ECAA struct {
 // NewECA sets up a new ECA.
 //
 func NewECA() *ECA {
-
 	eca := &ECA{NewCA("eca"), nil, nil, nil}
 
 	{
@@ -280,7 +279,8 @@ func (ecap *ECAP) CreateCertificatePair(ctx context.Context, in *pb.ECertCreateR
 		}
 
 		var obcECKey []byte
-		if role&(int(pb.Role_VALIDATOR)|int(pb.Role_AUDITOR)) != 0 {
+		if role == int(pb.Role_VALIDATOR) {
+			//if role&(int(pb.Role_VALIDATOR)|int(pb.Role_AUDITOR)) != 0 {
 			obcECKey = ecap.eca.obcPriv
 		} else {
 			obcECKey = ecap.eca.obcPub

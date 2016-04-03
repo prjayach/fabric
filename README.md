@@ -1,8 +1,5 @@
-## Notice regarding the Linux Foundation's Hyperledger project
+## Notice: This repository has been moved to the [Linux Foundation's Hyperledger](https://github.com/hyperledger/fabric) project
 
-The openblockchain project is IBM's proposed contribution to the Linux Foundation's [Hyperledger](https://www.hyperledger.org/) project. We have made it available as open source to enable others to explore our architecture and design. IBM's intention is to engage rigorously in the Linux Foundation's [Hyperledger](https://www.hyperledger.org/) project as the community establishes itself, and decides on a code base. Once established, we will transition our development focus to the [Hyperledger](https://www.hyperledger.org/) effort, and this code will be maintained as needed for IBM's use.
-
-While we invite contribution to the openblockchain project, we believe that the broader blockchain community's focus should be the [Hyperledger](https://www.hyperledger.org/) project.
 
 # Openchain - Peer
 
@@ -62,7 +59,7 @@ The **peer** command will run peer process. You can then use the other commands 
 To run all unit tests, in one window, run `./obc-peer peer`. In a second window
 
     cd $GOPATH/src/github.com/openblockchain/obc-peer
-    go test -timeout=20m $(go list github.com/openblockchain/obc-peer/... | grep -v /vendor/)
+    go test -timeout=20m $(go list github.com/openblockchain/obc-peer/... | grep -v /vendor/ | grep -v /examples/)
 
 Note that the first time the tests are run, they can take some time due to the need to download a docker image that is about 1GB in size. This is why the timeout flag is added to the above command.
 
@@ -76,6 +73,10 @@ OBC also has [Behave](http://pythonhosted.org/behave/) tests that will setup net
 ```
 cd $GOPATH/src/github.com/openblockchain/obc-peer/openchain/peer/bddtests
 behave
+```
+Some of the Behave tests run inside Docker containers. If a test fails and you want to have the logs from the Docker containers, run the tests with this option
+```
+behave -D logs=Y
 ```
 
 Note, you must run the unit tests first to build the necessary Peer and OBCCA docker images. These images can also be individually built using the commands
@@ -143,11 +144,20 @@ This is not recommended, however some users may wish to build Openchain outside 
 1. Follow all steps required to setup and run a Vagrant image
 - Make you you have [Go 1.6](https://golang.org/) or later installed
 - Set the maximum number of open files to 10000 or greater for your OS
-- Install [RocksDB](https://github.com/facebook/rocksdb/blob/master/INSTALL.md) version 4.1
-- Run the following commands replacing `/opt/rocksdb` with the path where you installed RocksDB:
+- Install [RocksDB](https://github.com/facebook/rocksdb/blob/master/INSTALL.md) version 4.1 and it's dependencies:
+```
+apt-get install -y libsnappy-dev zlib1g-dev libbz2-dev
+cd /tmp
+git clone https://github.com/facebook/rocksdb.git
+cd rocksdb
+git checkout tags/v4.1
+PORTABLE=1 make shared_lib
+INSTALL_PATH=/usr/local make install-shared
+```
+- Run the following commands:
 ```
 cd $GOPATH/src/github.com/openblockchain/obc-peer
-CGO_CFLAGS="-I/opt/rocksdb/include" CGO_LDFLAGS="-L/opt/rocksdb -lrocksdb -lstdc++ -lm -lz -lbz2 -lsnappy" go install
+CGO_CFLAGS=" " CGO_LDFLAGS="-lrocksdb -lstdc++ -lm -lz -lbz2 -lsnappy" go install
 ```
 - Make sure that the Docker daemon initialization includes the options
 ```

@@ -22,6 +22,7 @@ package crypto
 import (
 	"crypto/ecdsa"
 	"crypto/x509"
+	"github.com/openblockchain/obc-peer/openchain/crypto/ecies"
 	"github.com/openblockchain/obc-peer/openchain/crypto/utils"
 )
 
@@ -30,13 +31,11 @@ import (
 type nodeImpl struct {
 	isInitialized bool
 
+	// Node type
+	eType NodeType
+
 	// Configuration
 	conf *configuration
-
-	/*
-		// Logging
-		log *logging.Logger
-	*/
 
 	// keyStore
 	ks *keyStore
@@ -57,10 +56,17 @@ type nodeImpl struct {
 	enrollCertHash []byte
 
 	// Enrollment Chain
-	enrollChainKey []byte
+	enrollChainKey interface{}
 
 	// TLS
 	tlsCert *x509.Certificate
+
+	// Crypto SPI
+	eciesSPI ecies.SPI
+}
+
+func (node *nodeImpl) GetType() NodeType {
+	return node.eType
 }
 
 func (node *nodeImpl) GetName() string {
@@ -73,31 +79,29 @@ func (node *nodeImpl) isRegistered() bool {
 	return !missing
 }
 
-func (node *nodeImpl) register(prefix, name string, pwd []byte, enrollID, enrollPWD string) error {
+func (node *nodeImpl) register(eType NodeType, name string, pwd []byte, enrollID, enrollPWD string) error {
 	if node.isInitialized {
-		node.error("Registering [%s]...done! Initialization already performed", enrollID)
-
 		return utils.ErrAlreadyInitialized
 	}
 
+	// Set entity type
+	node.eType = eType
+
 	// Init Conf
-	if err := node.initConfiguration(prefix, name); err != nil {
-		log.Error("Failed initiliazing configuration [%s] [%s].", enrollID, err)
+	if err := node.initConfiguration(name); err != nil {
+		log.Error("Failed initiliazing configuration [%s]: [%s].", enrollID, err)
 
 		return err
 	}
 
 	// Start registration
-	node.debug("Registering [%s]...", enrollID)
-
 	if node.isRegistered() {
-		node.error("Registering [%s]...done! Registration already performed", enrollID)
-
 		return utils.ErrAlreadyRegistered
+	} else {
+		node.debug("Registering node [%s]...", enrollID)
 	}
 
 	// Initialize keystore
-	node.debug("Init keystore...")
 	err := node.initKeyStore(pwd)
 	if err != nil {
 		if err != utils.ErrKeyStoreAlreadyInitialized {
@@ -108,29 +112,31 @@ func (node *nodeImpl) register(prefix, name string, pwd []byte, enrollID, enroll
 			return err
 		}
 	}
-	node.debug("Init keystore...done.")
 
 	// Register crypto engine
 	err = node.registerCryptoEngine(enrollID, enrollPWD)
 	if err != nil {
-		node.error("Failed registering crypto engine [%s].", err.Error())
+		node.error("Failed registering node crypto engine [%s].", err.Error())
 		return err
 	}
 
-	node.debug("Registering [%s]...done!", enrollID)
+	node.debug("Registering node [%s]...done!", enrollID)
 
 	return nil
 }
 
-func (node *nodeImpl) init(prefix, name string, pwd []byte) error {
+func (node *nodeImpl) init(eType NodeType, name string, pwd []byte) error {
 	if node.isInitialized {
 		node.error("Already initializaed.")
 
 		return utils.ErrAlreadyInitialized
 	}
 
+	// Set entity type
+	node.eType = eType
+
 	// Init Conf
-	if err := node.initConfiguration(prefix, name); err != nil {
+	if err := node.initConfiguration(name); err != nil {
 		return err
 	}
 
