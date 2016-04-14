@@ -1,5 +1,5 @@
 # Local build binaries
-obc-peer
+fabric
 node-cli/node-cli
 *.pyc
 /build/_workspace
@@ -10,3 +10,5 @@ node-cli/node-cli
 tags
 .tags
 /obcca/.obcca
+.vagrant/
+membersrvc/membersrvc

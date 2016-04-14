@@ -4,8 +4,8 @@ import (
 	"fmt"
 
 	"github.com/golang/protobuf/proto"
-	"github.com/openblockchain/obc-peer/examples/chaincode/go/utxo/util"
-	"github.com/openblockchain/obc-peer/openchain/chaincode/shim"
+	"github.com/hyperledger/fabric/examples/chaincode/go/utxo/util"
+	"github.com/hyperledger/fabric/core/chaincode/shim"
 )
 
 type Store struct {
@@ -50,4 +50,19 @@ func (s *Store) PutState(key util.Key, value *util.TX_TXOUT) error {
 		return fmt.Errorf("Error marshalling value to bytes:  %s", err)
 	}
 	return s.stub.PutState(keyToString(&key), data)
+}
+
+func (s *Store) GetTran(key string) ([]byte, bool, error) {
+	data, err := s.stub.GetState(key)
+	if err != nil {
+		return nil, false, fmt.Errorf("Error getting state from stub:  %s", err)
+	}
+	if data == nil {
+		return nil, false, nil
+	}
+	return data, true, nil
+}
+
+func (s *Store) PutTran(key string, value []byte) error {
+	return s.stub.PutState(key, value)
 }

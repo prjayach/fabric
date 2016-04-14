@@ -43,36 +43,37 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/grpclog"
 
-	"github.com/openblockchain/obc-peer/events/producer"
-	"github.com/openblockchain/obc-peer/openchain"
-	"github.com/openblockchain/obc-peer/openchain/chaincode"
-	"github.com/openblockchain/obc-peer/openchain/consensus/helper"
-	"github.com/openblockchain/obc-peer/openchain/crypto"
-	"github.com/openblockchain/obc-peer/openchain/ledger/genesis"
-	"github.com/openblockchain/obc-peer/openchain/peer"
-	"github.com/openblockchain/obc-peer/openchain/rest"
-	pb "github.com/openblockchain/obc-peer/protos"
+	"github.com/hyperledger/fabric/consensus/helper"
+	"github.com/hyperledger/fabric/core"
+	"github.com/hyperledger/fabric/core/chaincode"
+	"github.com/hyperledger/fabric/core/crypto"
+	"github.com/hyperledger/fabric/core/ledger/genesis"
+	"github.com/hyperledger/fabric/core/peer"
+	"github.com/hyperledger/fabric/core/rest"
+	"github.com/hyperledger/fabric/events/producer"
+	pb "github.com/hyperledger/fabric/protos"
 )
 
 var logger = logging.MustGetLogger("main")
 
 // Constants go here.
+const fabric = "hyperledger"
 const chainFuncName = "chaincode"
-const cmdRoot = "openchain"
+const cmdRoot = "core"
 const undefinedParamValue = ""
 
 // The main command describes the service and
 // defaults to printing the help message.
 var mainCmd = &cobra.Command{
-	Use: "obc-peer",
+	Use: "peer",
 }
 
 var peerCmd = &cobra.Command{
 	Use:   "peer",
-	Short: "Run openchain peer.",
-	Long:  `Runs the openchain peer that interacts with the openchain network.`,
+	Short: "Runs the peer.",
+	Long:  `Runs a peer that interacts with the network.`,
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
-		openchain.LoggingInit("peer")
+		core.LoggingInit("peer")
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return serve(args)
@@ -81,10 +82,10 @@ var peerCmd = &cobra.Command{
 
 var statusCmd = &cobra.Command{
 	Use:   "status",
-	Short: "Status of the openchain peer.",
-	Long:  `Outputs the status of the currently running openchain peer.`,
+	Short: "Returns status of the peer.",
+	Long:  `Returns the status of the currently running peer.`,
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
-		openchain.LoggingInit("status")
+		core.LoggingInit("status")
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return status()
@@ -93,10 +94,10 @@ var statusCmd = &cobra.Command{
 
 var stopCmd = &cobra.Command{
 	Use:   "stop",
-	Short: "Stop openchain peer.",
-	Long:  `Stops the currently running openchain Peer, disconnecting from the openchain network.`,
+	Short: "Stops the running peer.",
+	Long:  `Stops the currently running peer, disconnecting from the network.`,
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
-		openchain.LoggingInit("stop")
+		core.LoggingInit("stop")
 	},
 	Run: func(cmd *cobra.Command, args []string) {
 		stop()
@@ -105,40 +106,40 @@ var stopCmd = &cobra.Command{
 
 var loginCmd = &cobra.Command{
 	Use:   "login",
-	Short: "Login user on CLI.",
-	Long:  `Login the local user on CLI. Must supply username parameter.`,
+	Short: "Logs in a user on CLI.",
+	Long:  `Logs in the local user on CLI. Must supply username as a parameter.`,
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
-		openchain.LoggingInit("login")
+		core.LoggingInit("login")
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return login(args)
 	},
 }
 
-var vmCmd = &cobra.Command{
-	Use:   "vm",
-	Short: "VM functionality of openchain.",
-	Long:  `Interact with the VM functionality of openchain.`,
-	PersistentPreRun: func(cmd *cobra.Command, args []string) {
-		openchain.LoggingInit("vm")
-	},
-}
-
-var vmPrimeCmd = &cobra.Command{
-	Use:   "prime",
-	Short: "Prime the VM functionality of openchain.",
-	Long:  `Primes the VM functionality of openchain by preparing the necessary VM construction artifacts.`,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return stop()
-	},
-}
+// var vmCmd = &cobra.Command{
+// 	Use:   "vm",
+// 	Short: "Accesses VM specific functionality.",
+// 	Long:  `Accesses VM specific functionality.`,
+// 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
+// 		core.LoggingInit("vm")
+// 	},
+// }
+//
+// var vmPrimeCmd = &cobra.Command{
+// 	Use:   "prime",
+// 	Short: "Primes the VM functionality.",
+// 	Long:  `Primes the VM functionality by preparing the necessary VM construction artifacts.`,
+// 	RunE: func(cmd *cobra.Command, args []string) error {
+// 		return stop()
+// 	},
+// }
 
 var networkCmd = &cobra.Command{
 	Use:   "network",
-	Short: "List of network peers.",
-	Long:  `Show a list of all existing network connections for the target peer node, includes both validating and non-validating peers.`,
+	Short: "Lists all network peers.",
+	Long:  `Returns a list of all existing network connections for the target peer node, includes both validating and non-validating peers.`,
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
-		openchain.LoggingInit("network")
+		core.LoggingInit("network")
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return network()
@@ -162,7 +163,7 @@ var chaincodeCmd = &cobra.Command{
 	Short: fmt.Sprintf("%s specific commands.", chainFuncName),
 	Long:  fmt.Sprintf("%s specific commands.", chainFuncName),
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
-		openchain.LoggingInit(chainFuncName)
+		core.LoggingInit(chainFuncName)
 	},
 }
 
@@ -199,8 +200,6 @@ var chaincodeQueryCmd = &cobra.Command{
 }
 
 func main() {
-	runtime.GOMAXPROCS(2)
-
 	// For environment variables.
 	viper.SetEnvPrefix(cmdRoot)
 	viper.AutomaticEnv()
@@ -210,7 +209,7 @@ func main() {
 	// Define command-line flags that are valid for all obc-peer commands and
 	// subcommands.
 	mainFlags := mainCmd.PersistentFlags()
-	mainFlags.String("logging-level", "", "Default logging level and overrides, see openchain.yaml for full syntax")
+	mainFlags.String("logging-level", "", "Default logging level and overrides, see core.yaml for full syntax")
 	viper.BindPFlag("logging_level", mainFlags.Lookup("logging-level"))
 
 	// Set the flags on the peer command.
@@ -236,7 +235,7 @@ func main() {
 	viper.AddConfigPath("./")    // Path to look for the config file in
 	err := viper.ReadInConfig()  // Find and read the config file
 	if err != nil {              // Handle errors reading the config file
-		panic(fmt.Errorf("Fatal error when reading %s config file: %s \n", cmdRoot, err))
+		panic(fmt.Errorf("Fatal error when reading %s config file: %s\n", cmdRoot, err))
 	}
 
 	mainCmd.AddCommand(peerCmd)
@@ -244,8 +243,8 @@ func main() {
 	mainCmd.AddCommand(stopCmd)
 	mainCmd.AddCommand(loginCmd)
 
-	vmCmd.AddCommand(vmPrimeCmd)
-	mainCmd.AddCommand(vmCmd)
+	// vmCmd.AddCommand(vmPrimeCmd)
+	// mainCmd.AddCommand(vmCmd)
 
 	mainCmd.AddCommand(networkCmd)
 
@@ -263,6 +262,8 @@ func main() {
 	chaincodeCmd.AddCommand(chaincodeQueryCmd)
 
 	mainCmd.AddCommand(chaincodeCmd)
+
+	runtime.GOMAXPROCS(viper.GetInt("peer.gomaxprocs"))
 
 	// Init the crypto layer
 	if err := crypto.Init(); err != nil {
@@ -297,8 +298,8 @@ func createEventHubServer() (net.Listener, *grpc.Server, error) {
 		}
 
 		grpcServer = grpc.NewServer(opts...)
-		ehServer := producer.NewOpenchainEventsServer(uint(viper.GetInt("peer.validator.events.buffersize")), viper.GetInt("peer.validator.events.timeout"))
-		pb.RegisterOpenchainEventsServer(grpcServer, ehServer)
+		ehServer := producer.NewEventsServer(uint(viper.GetInt("peer.validator.events.buffersize")), viper.GetInt("peer.validator.events.timeout"))
+		pb.RegisterEventsServer(grpcServer, ehServer)
 	}
 	return lis, grpcServer, err
 }
@@ -310,7 +311,7 @@ func serve(args []string) error {
 		return err
 	}
 
-	listenAddr := viper.GetString("peer.listenaddress")
+	listenAddr := viper.GetString("peer.listenAddress")
 
 	if "" == listenAddr {
 		logger.Debug("Listen address not specified, using peer endpoint address")
@@ -337,8 +338,8 @@ func serve(args []string) error {
 		viper.Set("chaincode.mode", chaincode.DevModeUserRunsChaincode)
 
 		// Disable validity system chaincode in dev mode. Also if security is enabled,
-		// in obcca.yaml, manually set pki.validity-period.update to false to prevent
-		// obcca from calling validity system chaincode -- though no harm otherwise
+		// in membersrvc.yaml, manually set pki.validity-period.update to false to prevent
+		// membersrvc from calling validity system chaincode -- though no harm otherwise
 		viper.Set("ledger.blockchain.deploy-system-chaincode", "false")
 		viper.Set("validator.validity-period.verification", "false")
 	}
@@ -377,7 +378,7 @@ func serve(args []string) error {
 	pb.RegisterPeerServer(grpcServer, peerServer)
 
 	// Register the Admin server
-	pb.RegisterAdminServer(grpcServer, openchain.NewAdminServer())
+	pb.RegisterAdminServer(grpcServer, core.NewAdminServer())
 
 	// Register ChaincodeSupport server...
 	// TODO : not the "DefaultChain" ... we have to revisit when we do multichain
@@ -392,11 +393,11 @@ func serve(args []string) error {
 	registerChaincodeSupport(chaincode.DefaultChain, grpcServer, secHelper)
 
 	// Register Devops server
-	serverDevops := openchain.NewDevopsServer(peerServer)
+	serverDevops := core.NewDevopsServer(peerServer)
 	pb.RegisterDevopsServer(grpcServer, serverDevops)
 
 	// Register the ServerOpenchain server
-	serverOpenchain, err := openchain.NewOpenchainServerWithPeerInfo(peerServer)
+	serverOpenchain, err := rest.NewOpenchainServerWithPeerInfo(peerServer)
 	if err != nil {
 		err = fmt.Errorf("Error creating OpenchainServer: %s", err)
 		return err
@@ -409,7 +410,7 @@ func serve(args []string) error {
 		go rest.StartOpenchainRESTServer(serverOpenchain, serverDevops)
 	}
 
-	rootNode, err := openchain.GetRootNode()
+	rootNode, err := core.GetRootNode()
 	if err != nil {
 		grpclog.Fatalf("Failed to get peer.discovery.rootnode valey: %s", err)
 	}
@@ -451,7 +452,7 @@ func serve(args []string) error {
 func status() (err error) {
 	clientConn, err := peer.NewPeerClientConnection()
 	if err != nil {
-		err = fmt.Errorf("Error trying to connect to local peer:", err)
+		err = fmt.Errorf("Error trying to connect to local peer: %s", err)
 		return
 	}
 
@@ -468,7 +469,7 @@ func status() (err error) {
 func stop() (err error) {
 	clientConn, err := peer.NewPeerClientConnection()
 	if err != nil {
-		err = fmt.Errorf("Error trying to connect to local peer:", err)
+		err = fmt.Errorf("Error trying to connect to local peer: %s", err)
 		return
 	}
 
@@ -490,13 +491,13 @@ func login(args []string) (err error) {
 
 	// Check for username argument
 	if len(args) == 0 {
-		err = fmt.Errorf("Must supply username")
+		err = errors.New("Must supply username")
 		return
 	}
 
 	// Check for other extraneous arguments
 	if len(args) != 1 {
-		err = fmt.Errorf("Must supply username as the 1st and only parameter")
+		err = errors.New("Must supply username as the 1st and only parameter")
 		return
 	}
 
@@ -608,7 +609,7 @@ func checkChaincodeCmdParams(cmd *cobra.Command) (err error) {
 		var f interface{}
 		err = json.Unmarshal([]byte(chaincodeCtorJSON), &f)
 		if err != nil {
-			err = fmt.Errorf("Chaincode argument error : %s", err)
+			err = fmt.Errorf("Chaincode argument error: %s", err)
 			return
 		}
 		m := f.(map[string]interface{})
@@ -626,7 +627,7 @@ func checkChaincodeCmdParams(cmd *cobra.Command) (err error) {
 			}
 		}
 	} else {
-		err = fmt.Errorf("Empty JSON chaincode parameters must contain exactly 2 keys - 'Function' and 'Args'")
+		err = errors.New("Empty JSON chaincode parameters must contain exactly 2 keys - 'Function' and 'Args'")
 		return
 	}
 
@@ -843,14 +844,14 @@ func chaincodeInvokeOrQuery(cmd *cobra.Command, args []string, invoke bool) (err
 func network() (err error) {
 	clientConn, err := peer.NewPeerClientConnection()
 	if err != nil {
-		err = fmt.Errorf("Error trying to connect to local peer:", err)
+		err = fmt.Errorf("Error trying to connect to local peer: %s", err)
 		return
 	}
 	openchainClient := pb.NewOpenchainClient(clientConn)
 	peers, err := openchainClient.GetPeers(context.Background(), &google_protobuf.Empty{})
 
 	if err != nil {
-		err = fmt.Errorf("Error trying to get peers:", err)
+		err = fmt.Errorf("Error trying to get peers: %s", err)
 		return
 	}
 

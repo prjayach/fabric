@@ -24,7 +24,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/openblockchain/obc-peer/openchain/chaincode/shim"
+	"github.com/hyperledger/fabric/core/chaincode/shim"
 )
 
 // This chaincode implements a simple map that is stored in the state.
@@ -42,14 +42,14 @@ import (
 type SimpleChaincode struct {
 }
 
+func (t *SimpleChaincode) Init(stub *shim.ChaincodeStub, function string, args []string) ([]byte, error) {
+	return nil, nil
+}
+
 // Run callback representing the invocation of a chaincode
-func (t *SimpleChaincode) Run(stub *shim.ChaincodeStub, function string, args []string) ([]byte, error) {
+func (t *SimpleChaincode) Invoke(stub *shim.ChaincodeStub, function string, args []string) ([]byte, error) {
 
 	switch function {
-
-	case "init":
-		// Do nothing
-
 	case "put":
 		if len(args) < 2 {
 			return nil, errors.New("put operation must include two arguments, a key and value")

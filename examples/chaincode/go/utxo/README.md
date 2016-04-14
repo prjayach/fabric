@@ -16,22 +16,22 @@ The following are instructions for building and deploying the UTXO chaincode in 
 First, build the Docker image for the UTXO chaincode.
 
 ```
-cd $GOPATH/src/github.com/openblockchain/obc-peer/examples/chaincode/go/utxo/
+cd $GOPATH/src/github.com/hyperledger/fabric/examples/chaincode/go/utxo/
 docker build -t utxo:0.1.0 .
 ```
 
-Next, modify the `openchain.yaml` file in the obc-peer project to point to the local Docker image that was built in the previous step. In the openchain.yaml file find `chaincode.golang.Dockerfile` and change it from from `golang:1.6` to `utxo:0.1.0`
+Next, modify the `core.yaml` file in the obc-peer project to point to the local Docker image that was built in the previous step. In the core.yaml file find `chaincode.golang.Dockerfile` and change it from from `openblockchain/baseimage` to `utxo:0.1.0`
 
 Start the peer using the following commands
 ```
-cd $GOPATH/src/github.com/openblockchain/obc-peer
-./obc-peer peer
+cd $GOPATH/src/github.com/hyperledger/fabric
+./peer peer
 ```
 
 In a second window, deploy the example UTXO chaincode
 ```
-cd $GOPATH/src/github.com/openblockchain/obc-peer
-OPENCHAIN_PEER_ADDRESS=localhost:30303 ./obc-peer chaincode deploy -p github.com/openblockchain/obc-peer/examples/chaincode/go/utxo -c '{"Function":"init", "Args": []}'
+cd $GOPATH/src/github.com/hyperledger/fabric
+OPENCHAIN_PEER_ADDRESS=localhost:30303 ./peer chaincode deploy -p github.com/hyperledger/fabric/examples/chaincode/go/utxo -c '{"Function":"init", "Args": []}'
 ```
 Wait about 30 seconds for the chaincode to be deployed. Output from the window where the peer is running will indicate that this is successful.
 
@@ -49,12 +49,12 @@ Stop the running peer.
 
 Build a peer docker image by running the following test. This will allow for easy testing of the chaincode by giving us the ability to reset the database to a clean state.
 ```
-go test github.com/openblockchain/obc-peer/openchain/container -run=BuildImage_Peer
+go test github.com/hyperledger/fabric/core/container -run=BuildImage_Peer
 ```
 
 Using the Docker image that we just built, start a peer within a container in `chaincodedev` mode.
 ```
-docker run -it -p 30303:30303 openchain-peer obc-peer peer --peer-chaincodedev
+docker run -it -p 30303:30303 -p 31315:31315 hyperledger-peer fabric peer --peer-chaincodedev
 ```
 
 
@@ -65,15 +65,15 @@ docker run -it <image ID> /bin/bash
 
 Build the UTXO chaincode.
 ```
-cd $GOPATH/src/github.com/openblockchain/obc-peer/examples/chaincode/go/utxo/
+cd $GOPATH/src/github.com/hyperledger/fabric/examples/chaincode/go/utxo/
 go build
-OPENCHAIN_PEER_ADDRESS=172.17.0.2:30303 OPENCHAIN_CHAINCODE_ID_NAME=utxo ./utxo
+CORE_PEER_ADDRESS=172.17.0.2:30303 CORE_CHAINCODE_ID_NAME=utxo ./utxo
 ```
 
 In another window, deploy the chaincode
 ```
-cd $GOPATH/src/github.com/openblockchain/obc-peer/
-./obc-peer chaincode deploy -n utxo -c '{"Function":"init", "Args": []}'
+cd $GOPATH/src/github.com/hyperledger/fabric/
+./peer chaincode deploy -n utxo -c '{"Function":"init", "Args": []}'
 ```
 
 The chaincode is now deployed and ready to accept transactions.
