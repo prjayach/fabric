@@ -1,26 +1,24 @@
 /*
-Licensed to the Apache Software Foundation (ASF) under one
-or more contributor license agreements.  See the NOTICE file
-distributed with this work for additional information
-regarding copyright ownership.  The ASF licenses this file
-to you under the Apache License, Version 2.0 (the
-"License"); you may not use this file except in compliance
-with the License.  You may obtain a copy of the License at
+Copyright IBM Corp. 2016 All Rights Reserved.
 
-  http://www.apache.org/licenses/LICENSE-2.0
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
 
-Unless required by applicable law or agreed to in writing,
-software distributed under the License is distributed on an
-"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-KIND, either express or implied.  See the License for the
-specific language governing permissions and limitations
-under the License.
+		 http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
 */
 
 package rest
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"google/protobuf"
 	"io"
@@ -42,6 +40,7 @@ import (
 	"github.com/hyperledger/fabric/core/chaincode"
 	"github.com/hyperledger/fabric/core/crypto"
 	"github.com/hyperledger/fabric/core/crypto/utils"
+	"github.com/hyperledger/fabric/core/peer"
 	pb "github.com/hyperledger/fabric/protos"
 )
 
@@ -73,7 +72,37 @@ type rpcRequest struct {
 	Jsonrpc *string           `json:"jsonrpc,omitempty"`
 	Method  *string           `json:"method,omitempty"`
 	Params  *pb.ChaincodeSpec `json:"params,omitempty"`
-	ID      *int64            `json:"id,omitempty"`
+	ID      *rpcID            `json:"id,omitempty"`
+}
+
+type rpcID struct {
+	StringValue *string
+	IntValue    *int64
+}
+
+func (id *rpcID) UnmarshalJSON(b []byte) error {
+	var err error
+	s, n := "", int64(0)
+
+	if err = json.Unmarshal(b, &s); err == nil {
+		id.StringValue = &s
+		return nil
+	}
+	if err = json.Unmarshal(b, &n); err == nil {
+		id.IntValue = &n
+		return nil
+	}
+	return fmt.Errorf("cannot unmarshal %s into Go value of type int64 or string", string(b))
+}
+
+func (id *rpcID) MarshalJSON() ([]byte, error) {
+	if id.StringValue != nil {
+		return json.Marshal(id.StringValue)
+	}
+	if id.IntValue != nil {
+		return json.Marshal(id.IntValue)
+	}
+	return nil, errors.New("cannot marshal rpcID")
 }
 
 // rpcResponse defines the JSON RPC 2.0 response payload for the /chaincode endpoint.
@@ -81,7 +110,7 @@ type rpcResponse struct {
 	Jsonrpc string     `json:"jsonrpc,omitempty"`
 	Result  *rpcResult `json:"result,omitempty"`
 	Error   *rpcError  `json:"error,omitempty"`
-	ID      *int64     `json:"id"`
+	ID      *rpcID     `json:"id"`
 }
 
 // rpcResult defines the structure for an rpc sucess/error result message.
@@ -344,7 +373,7 @@ func (s *ServerOpenchainREST) GetEnrollmentCert(rw web.ResponseWriter, req *web.
 	}
 
 	// If security is enabled, initialize the crypto client
-	if viper.GetBool("security.enabled") {
+	if core.SecurityEnabled() {
 		if restLogger.IsEnabledFor(logging.DEBUG) {
 			restLogger.Debug("Initializing secure client using context '%s'", enrollmentID)
 		}
@@ -466,7 +495,7 @@ func (s *ServerOpenchainREST) GetTransactionCert(rw web.ResponseWriter, req *web
 	}
 
 	// If security is enabled, initialize the crypto client
-	if viper.GetBool("security.enabled") {
+	if core.SecurityEnabled() {
 		if restLogger.IsEnabledFor(logging.DEBUG) {
 			restLogger.Debug("Initializing secure client using context '%s'", enrollmentID)
 		}
@@ -718,7 +747,7 @@ func (s *ServerOpenchainREST) Deploy(rw web.ResponseWriter, req *web.Request) {
 	}
 
 	// If security is enabled, add client login token
-	if viper.GetBool("security.enabled") {
+	if core.SecurityEnabled() {
 		chaincodeUsr := spec.SecureContext
 		if chaincodeUsr == "" {
 			rw.WriteHeader(http.StatusBadRequest)
@@ -854,7 +883,7 @@ func (s *ServerOpenchainREST) Invoke(rw web.ResponseWriter, req *web.Request) {
 	}
 
 	// If security is enabled, add client login token
-	if viper.GetBool("security.enabled") {
+	if core.SecurityEnabled() {
 		chaincodeUsr := spec.ChaincodeSpec.SecureContext
 		if chaincodeUsr == "" {
 			rw.WriteHeader(http.StatusBadRequest)
@@ -990,7 +1019,7 @@ func (s *ServerOpenchainREST) Query(rw web.ResponseWriter, req *web.Request) {
 	}
 
 	// If security is enabled, add client login token
-	if viper.GetBool("security.enabled") {
+	if core.SecurityEnabled() {
 		chaincodeUsr := spec.ChaincodeSpec.SecureContext
 		if chaincodeUsr == "" {
 			rw.WriteHeader(http.StatusBadRequest)
@@ -1353,7 +1382,7 @@ func (s *ServerOpenchainREST) processChaincodeDeploy(spec *pb.ChaincodeSpec) rpc
 	// Check if security is enabled
 	//
 
-	if viper.GetBool("security.enabled") {
+	if core.SecurityEnabled() {
 		// User registrationID must be present inside request payload with security enabled
 		chaincodeUsr := spec.SecureContext
 		if chaincodeUsr == "" {
@@ -1481,7 +1510,7 @@ func (s *ServerOpenchainREST) processChaincodeInvokeOrQuery(method string, spec 
 	// Check if security is enabled
 	//
 
-	if viper.GetBool("security.enabled") {
+	if core.SecurityEnabled() {
 		// User registrationID must be present inside request payload with security enabled
 		chaincodeUsr := spec.ChaincodeSpec.SecureContext
 		if chaincodeUsr == "" {
@@ -1707,7 +1736,7 @@ func StartOpenchainRESTServer(server *ServerOpenchain, devops *core.Devops) {
 	router.NotFound((*ServerOpenchainREST).NotFound)
 
 	// Start server
-	if viper.GetBool("peer.tls.enabled") {
+	if peer.TlsEnabled() {
 		err := http.ListenAndServeTLS(viper.GetString("rest.address"), viper.GetString("peer.tls.cert.file"), viper.GetString("peer.tls.key.file"), router)
 		if err != nil {
 			restLogger.Error(fmt.Sprintf("ListenAndServeTLS: %s", err))

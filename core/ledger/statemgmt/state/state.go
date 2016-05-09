@@ -1,20 +1,17 @@
 /*
-Licensed to the Apache Software Foundation (ASF) under one
-or more contributor license agreements.  See the NOTICE file
-distributed with this work for additional information
-regarding copyright ownership.  The ASF licenses this file
-to you under the Apache License, Version 2.0 (the
-"License"); you may not use this file except in compliance
-with the License.  You may obtain a copy of the License at
+Copyright IBM Corp. 2016 All Rights Reserved.
 
-  http://www.apache.org/licenses/LICENSE-2.0
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
 
-Unless required by applicable law or agreed to in writing,
-software distributed under the License is distributed on an
-"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-KIND, either express or implied.  See the License for the
-specific language governing permissions and limitations
-under the License.
+		 http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
 */
 
 package state
@@ -23,13 +20,12 @@ import (
 	"encoding/binary"
 	"fmt"
 
-	"github.com/op/go-logging"
 	"github.com/hyperledger/fabric/core/db"
 	"github.com/hyperledger/fabric/core/ledger/statemgmt"
 	"github.com/hyperledger/fabric/core/ledger/statemgmt/buckettree"
 	"github.com/hyperledger/fabric/core/ledger/statemgmt/raw"
 	"github.com/hyperledger/fabric/core/ledger/statemgmt/trie"
-	"github.com/spf13/viper"
+	"github.com/op/go-logging"
 	"github.com/tecbot/gorocksdb"
 )
 
@@ -54,16 +50,8 @@ type State struct {
 
 // NewState constructs a new State. This Initializes encapsulated state implementation
 func NewState() *State {
-	stateImplName := viper.GetString("ledger.state.dataStructure.name")
-	stateImplConfigs := viper.GetStringMap("ledger.state.dataStructure.configs")
-
-	if len(stateImplName) == 0 {
-		stateImplName = detaultStateImpl
-		stateImplConfigs = nil
-	}
-
+	initConfig()
 	logger.Info("Initializing state implementation [%s]", stateImplName)
-
 	switch stateImplName {
 	case "buckettree":
 		stateImpl = buckettree.NewStateImpl()
@@ -72,16 +60,11 @@ func NewState() *State {
 	case "raw":
 		stateImpl = raw.NewRawState()
 	default:
-		panic(fmt.Errorf("Error during initialization of state implementation. State data structure '%s' is not valid.", stateImplName))
+		panic("Should not reach here. Configs should have checked for the stateImplName being a valid names ")
 	}
-
 	err := stateImpl.Initialize(stateImplConfigs)
 	if err != nil {
 		panic(fmt.Errorf("Error during initialization of state implementation: %s", err))
-	}
-	deltaHistorySize := viper.GetInt("ledger.state.deltaHistorySize")
-	if deltaHistorySize < 0 {
-		panic(fmt.Errorf("Delta history size must be greater than or equal to 0. Current value is %d.", deltaHistorySize))
 	}
 	return &State{stateImpl, statemgmt.NewStateDelta(), statemgmt.NewStateDelta(), "", make(map[string][]byte),
 		false, uint64(deltaHistorySize)}
@@ -198,6 +181,47 @@ func (state *State) Delete(chaincodeID string, key string) error {
 		state.currentTxStateDelta.Delete(chaincodeID, key, previousValue)
 	}
 
+	return nil
+}
+
+// CopyState copies all the key-values from sourceChaincodeID to destChaincodeID
+func (state *State) CopyState(sourceChaincodeID string, destChaincodeID string) error {
+	itr, err := state.GetRangeScanIterator(sourceChaincodeID, "", "", true)
+	defer itr.Close()
+	if err != nil {
+		return err
+	}
+	for itr.Next() {
+		k, v := itr.GetKeyValue()
+		err := state.Set(destChaincodeID, k, v)
+		if err != nil{
+			return err
+		}
+	}
+	return nil
+}
+
+// GetMultipleKeys returns the values for the multiple keys.
+func (state *State) GetMultipleKeys(chaincodeID string, keys []string, committed bool) ([][]byte, error) {
+	var values [][]byte
+	for _,k := range keys{
+		v, err := state.Get(chaincodeID, k, committed)
+		if err != nil{
+			return nil, err
+		}
+		values = append(values, v)
+	}
+	return values, nil
+}
+
+// SetMultipleKeys sets the values for the multiple keys.
+func (state *State) SetMultipleKeys(chaincodeID string, kvs map[string][]byte) error {
+	for k,v := range kvs{
+		err := state.Set(chaincodeID, k, v)
+		if err != nil{
+			return err
+		}
+	}
 	return nil
 }
 

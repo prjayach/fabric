@@ -1,20 +1,17 @@
 /*
-Licensed to the Apache Software Foundation (ASF) under one
-or more contributor license agreements.  See the NOTICE file
-distributed with this work for additional information
-regarding copyright ownership.  The ASF licenses this file
-to you under the Apache License, Version 2.0 (the
-"License"); you may not use this file except in compliance
-with the License.  You may obtain a copy of the License at
+Copyright IBM Corp. 2016 All Rights Reserved.
 
-  http://www.apache.org/licenses/LICENSE-2.0
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
 
-Unless required by applicable law or agreed to in writing,
-software distributed under the License is distributed on an
-"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-KIND, either express or implied.  See the License for the
-specific language governing permissions and limitations
-under the License.
+		 http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
 */
 
 package crypto
@@ -32,10 +29,11 @@ import (
 	"testing"
 
 	"crypto/rand"
-	"github.com/op/go-logging"
-	"github.com/hyperledger/fabric/membersrvc/ca"
+	"github.com/hyperledger/fabric/core/crypto/primitives"
 	"github.com/hyperledger/fabric/core/crypto/utils"
 	"github.com/hyperledger/fabric/core/util"
+	"github.com/hyperledger/fabric/membersrvc/ca"
+	"github.com/op/go-logging"
 	"github.com/spf13/viper"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -284,6 +282,37 @@ func TestClientMultiExecuteTransaction(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Failed checking transaction [%s].", err)
 		}
+	}
+}
+
+func TestClientGetAttributesFromTCert(t *testing.T) {
+	tcert, err := deployer.GetNextTCert()
+
+	if err != nil {
+		t.Fatalf("Failed getting tcert: [%s]", err)
+	}
+	if tcert == nil {
+		t.Fatalf("TCert should be different from nil")
+	}
+
+	tcertDER := tcert.GetCertificate().Raw
+
+	if tcertDER == nil {
+		t.Fatalf("Cert should be different from nil")
+	}
+	if len(tcertDER) == 0 {
+		t.Fatalf("Cert should have length > 0")
+	}
+
+	attributeBytes, err := deployer.ReadAttribute("company", tcertDER)
+	if err != nil {
+		t.Fatalf("Error retrieving attribute from TCert: [%s]", err)
+	}
+
+	attributeValue := string(attributeBytes[:len(attributeBytes)])
+
+	if attributeValue != "IBM" {
+		t.Fatalf("Wrong attribute retrieved from TCert. Expected [%s], Actual [%s]", "IBM", attributeValue)
 	}
 }
 
@@ -549,16 +578,56 @@ func TestPeerStateEncryptor(t *testing.T) {
 func TestPeerSignVerify(t *testing.T) {
 	msg := []byte("Hello World!!!")
 	signature, err := peer.Sign(msg)
-	if err != utils.ErrNotImplemented {
-		t.Fatalf("Error must be ErrNotImplemented [%s].", err)
+	if err != nil {
+		t.Fatalf("TestSign: failed generating signature [%s].", err)
 	}
-	if signature != nil {
-		t.Fatalf("Result must be nil")
+
+	err = peer.Verify(peer.GetID(), signature, msg)
+	if err != nil {
+		t.Fatalf("TestSign: failed validating signature [%s].", err)
+	}
+
+	signature, err = validator.Sign(msg)
+	if err != nil {
+		t.Fatalf("TestSign: failed generating signature [%s].", err)
 	}
 
 	err = peer.Verify(validator.GetID(), signature, msg)
-	if err != utils.ErrNotImplemented {
-		t.Fatalf("Error must be ErrNotImplemented [%s].", err)
+	if err != nil {
+		t.Fatalf("TestSign: failed validating signature [%s].", err)
+	}
+}
+
+func TestPeerVerify(t *testing.T) {
+	msg := []byte("Hello World!!!")
+	signature, err := validator.Sign(msg)
+	if err != nil {
+		t.Fatalf("Failed generating signature [%s].", err)
+	}
+
+	err = peer.Verify(nil, signature, msg)
+	if err == nil {
+		t.Fatalf("Verify should fail when given an empty id.", err)
+	}
+
+	err = peer.Verify(msg, signature, msg)
+	if err == nil {
+		t.Fatalf("Verify should fail when given an invalid id.", err)
+	}
+
+	err = peer.Verify(validator.GetID(), nil, msg)
+	if err == nil {
+		t.Fatalf("Verify should fail when given an invalid signature.", err)
+	}
+
+	err = peer.Verify(validator.GetID(), msg, msg)
+	if err == nil {
+		t.Fatalf("Verify should fail when given an invalid signature.", err)
+	}
+
+	err = peer.Verify(validator.GetID(), signature, nil)
+	if err == nil {
+		t.Fatalf("Verify should fail when given an invalid messahe.", err)
 	}
 }
 
@@ -722,6 +791,14 @@ func TestValidatorQueryTransaction(t *testing.T) {
 			if !bytes.Equal(pt, aPt) {
 				t.Fatalf("Failed decrypting state [%s != %s]: %s", string(pt), string(aPt), err)
 			}
+			// Try to decrypt nil. It should return nil with no error
+			out, err := seOne.Decrypt(nil)
+			if err != nil {
+				t.Fatal("Decrypt should not fail on nil input")
+			}
+			if out != nil {
+				t.Fatal("Nil input should decrypt to nil")
+			}
 
 			// Second invokeTx
 			seTwo, err := validator.GetStateEncryptor(deployTx, invokeTxTwo)
@@ -734,6 +811,14 @@ func TestValidatorQueryTransaction(t *testing.T) {
 			}
 			if !bytes.Equal(pt, aPt2) {
 				t.Fatalf("Failed decrypting state [%s != %s]: %s", string(pt), string(aPt), err)
+			}
+			// Try to decrypt nil. It should return nil with no error
+			out, err = seTwo.Decrypt(nil)
+			if err != nil {
+				t.Fatal("Decrypt should not fail on nil input")
+			}
+			if out != nil {
+				t.Fatal("Nil input should decrypt to nil")
 			}
 
 			// queryTx
@@ -750,7 +835,6 @@ func TestValidatorQueryTransaction(t *testing.T) {
 			if !bytes.Equal(aPt2, aPt3) {
 				t.Fatalf("Failed decrypting query result [%s != %s]: %s", string(aPt2), string(aPt3), err)
 			}
-
 		}
 	}
 }
@@ -806,6 +890,15 @@ func TestValidatorStateEncryptor(t *testing.T) {
 		t.Fatalf("Failed decrypting state [%s != %s]: %s", string(pt), string(aPt), err)
 	}
 
+	// Try to decrypt nil. It should return nil with no error
+	out, err := seOne.Decrypt(nil)
+	if err != nil {
+		t.Fatal("Decrypt should not fail on nil input")
+	}
+	if out != nil {
+		t.Fatal("Nil input should decrypt to nil")
+	}
+
 	seTwo, err := validator.GetStateEncryptor(deployTx, invokeTxTwo)
 	if err != nil {
 		t.Fatalf("Failed creating state encryptor [%s].", err)
@@ -816,6 +909,15 @@ func TestValidatorStateEncryptor(t *testing.T) {
 	}
 	if !bytes.Equal(pt, aPt2) {
 		t.Fatalf("Failed decrypting state [%s != %s]: %s", string(pt), string(aPt), err)
+	}
+
+	// Try to decrypt nil. It should return nil with no error
+	out, err = seTwo.Decrypt(nil)
+	if err != nil {
+		t.Fatal("Decrypt should not fail on nil input")
+	}
+	if out != nil {
+		t.Fatal("Nil input should decrypt to nil")
 	}
 
 }
@@ -905,13 +1007,13 @@ func BenchmarkSign(b *testing.B) {
 	b.ResetTimer()
 
 	//b.Logf("#iterations %d\n", b.N)
-	signKey, _ := utils.NewECDSAKey()
+	signKey, _ := primitives.NewECDSAKey()
 	hash := make([]byte, 48)
 
 	for i := 0; i < b.N; i++ {
 		rand.Read(hash)
 		b.StartTimer()
-		utils.ECDSASign(signKey, hash)
+		primitives.ECDSASign(signKey, hash)
 		b.StopTimer()
 	}
 }
@@ -921,15 +1023,15 @@ func BenchmarkVerify(b *testing.B) {
 	b.ResetTimer()
 
 	//b.Logf("#iterations %d\n", b.N)
-	signKey, _ := utils.NewECDSAKey()
+	signKey, _ := primitives.NewECDSAKey()
 	verKey := signKey.PublicKey
 	hash := make([]byte, 48)
 
 	for i := 0; i < b.N; i++ {
 		rand.Read(hash)
-		sigma, _ := utils.ECDSASign(signKey, hash)
+		sigma, _ := primitives.ECDSASign(signKey, hash)
 		b.StartTimer()
-		utils.ECDSAVerify(&verKey, hash, sigma)
+		primitives.ECDSAVerify(&verKey, hash, sigma)
 		b.StopTimer()
 	}
 }
@@ -1193,7 +1295,7 @@ func createConfidentialTCertHDeployTransaction(t *testing.T) (*obc.Transaction, 
 
 	// Check binding consistency
 	binding, _ := txHandler.GetBinding()
-	if !reflect.DeepEqual(binding, utils.Hash(append(handler.GetCertificate(), tx.Nonce...))) {
+	if !reflect.DeepEqual(binding, primitives.Hash(append(handler.GetCertificate(), tx.Nonce...))) {
 		t.Fatal("Binding is malformed!")
 	}
 
@@ -1238,7 +1340,7 @@ func createConfidentialTCertHExecuteTransaction(t *testing.T) (*obc.Transaction,
 
 	// Check binding consistency
 	binding, _ := txHandler.GetBinding()
-	if !reflect.DeepEqual(binding, utils.Hash(append(handler.GetCertificate(), tx.Nonce...))) {
+	if !reflect.DeepEqual(binding, primitives.Hash(append(handler.GetCertificate(), tx.Nonce...))) {
 		t.Fatal("Binding is malformed!")
 	}
 
@@ -1283,7 +1385,7 @@ func createConfidentialTCertHQueryTransaction(t *testing.T) (*obc.Transaction, *
 
 	// Check binding consistency
 	binding, _ := txHandler.GetBinding()
-	if !reflect.DeepEqual(binding, utils.Hash(append(handler.GetCertificate(), tx.Nonce...))) {
+	if !reflect.DeepEqual(binding, primitives.Hash(append(handler.GetCertificate(), tx.Nonce...))) {
 		t.Fatal("Binding is malformed!")
 	}
 
@@ -1330,7 +1432,7 @@ func createConfidentialECertHDeployTransaction(t *testing.T) (*obc.Transaction, 
 
 	// Check binding consistency
 	binding, _ := txHandler.GetBinding()
-	if !reflect.DeepEqual(binding, utils.Hash(append(handler.GetCertificate(), tx.Nonce...))) {
+	if !reflect.DeepEqual(binding, primitives.Hash(append(handler.GetCertificate(), tx.Nonce...))) {
 		t.Fatal("Binding is malformed!")
 	}
 
@@ -1375,7 +1477,7 @@ func createConfidentialECertHExecuteTransaction(t *testing.T) (*obc.Transaction,
 
 	// Check binding consistency
 	binding, _ := txHandler.GetBinding()
-	if !reflect.DeepEqual(binding, utils.Hash(append(handler.GetCertificate(), tx.Nonce...))) {
+	if !reflect.DeepEqual(binding, primitives.Hash(append(handler.GetCertificate(), tx.Nonce...))) {
 		t.Fatal("Binding is malformed!")
 	}
 
@@ -1420,7 +1522,7 @@ func createConfidentialECertHQueryTransaction(t *testing.T) (*obc.Transaction, *
 
 	// Check binding consistency
 	binding, _ := txHandler.GetBinding()
-	if !reflect.DeepEqual(binding, utils.Hash(append(handler.GetCertificate(), tx.Nonce...))) {
+	if !reflect.DeepEqual(binding, primitives.Hash(append(handler.GetCertificate(), tx.Nonce...))) {
 		t.Fatal("Binding is malformed!")
 	}
 

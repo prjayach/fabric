@@ -1,25 +1,23 @@
 /*
-Licensed to the Apache Software Foundation (ASF) under one
-or more contributor license agreements.  See the NOTICE file
-distributed with this work for additional information
-regarding copyright ownership.  The ASF licenses this file
-to you under the Apache License, Version 2.0 (the
-"License"); you may not use this file except in compliance
-with the License.  You may obtain a copy of the License at
+Copyright IBM Corp. 2016 All Rights Reserved.
 
-  http://www.apache.org/licenses/LICENSE-2.0
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
 
-Unless required by applicable law or agreed to in writing,
-software distributed under the License is distributed on an
-"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-KIND, either express or implied.  See the License for the
-specific language governing permissions and limitations
-under the License.
+		 http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
 */
 
 package crypto
 
 import (
+	membersrvc "github.com/hyperledger/fabric/membersrvc/protos"
 	"errors"
 	"github.com/spf13/viper"
 	"path/filepath"
@@ -58,11 +56,13 @@ type configuration struct {
 	tlscaPAddressProperty     string
 
 	securityLevel int
+	hashAlgorithm string
 
 	tlsServerName string
 
 	multiThreading bool
-	tCertBathSize  int
+	tCertBatchSize  int
+	tCertAttributes []*membersrvc.TCertAttribute
 }
 
 func (conf *configuration) init() error {
@@ -112,6 +112,14 @@ func (conf *configuration) init() error {
 		}
 	}
 
+	conf.hashAlgorithm = "SHA3"
+	if viper.IsSet("security.hashAlgorithm") {
+		ovveride := viper.GetString("security.hashAlgorithm")
+		if ovveride != "" {
+			conf.hashAlgorithm = ovveride
+		}
+	}
+
 	// Set TLS host override
 	conf.tlsServerName = "tlsca"
 	if viper.IsSet("peer.pki.tls.serverhostoverride") {
@@ -121,12 +129,12 @@ func (conf *configuration) init() error {
 		}
 	}
 
-	// Set tCertBathSize
-	conf.tCertBathSize = 200
+	// Set tCertBatchSize
+	conf.tCertBatchSize = 200
 	if viper.IsSet("security.tcert.batch.size") {
 		ovveride := viper.GetInt("security.tcert.batch.size")
 		if ovveride != 0 {
-			conf.tCertBathSize = ovveride
+			conf.tCertBatchSize = ovveride
 		}
 	}
 
@@ -134,6 +142,15 @@ func (conf *configuration) init() error {
 	conf.multiThreading = false
 	if viper.IsSet("security.multithreading.enabled") {
 		conf.multiThreading = viper.GetBool("security.multithreading.enabled")
+	}
+
+	// Set attributes
+	conf.tCertAttributes = []*membersrvc.TCertAttribute{}
+	if viper.IsSet("security.tcert.attributes") {
+		attributes := viper.GetStringMapString("security.tcert.attributes")
+		for key, value := range attributes {
+			conf.tCertAttributes = append(conf.tCertAttributes, &membersrvc.TCertAttribute{key, value})
+		}
 	}
 
 	return nil
@@ -271,14 +288,10 @@ func (conf *configuration) getTCertOwnerKDFKeyFilename() string {
 	return "tca.kdf.key"
 }
 
-//func (conf *configuration) getRole() string {
-//	return viper.GetString(Role)
-//}
-//
-//func (conf *configuration) getAffiliation() string {
-//	return viper.GetString(Affiliation)
-//}
+func (conf *configuration) getTCertBatchSize() int {
+	return conf.tCertBatchSize
+}
 
-func (conf *configuration) getTCertBathSize() int {
-	return conf.tCertBathSize
+func (conf *configuration) getTCertAttributes() []*membersrvc.TCertAttribute {
+	return conf.tCertAttributes
 }

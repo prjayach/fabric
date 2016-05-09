@@ -1,20 +1,17 @@
 /*
-Licensed to the Apache Software Foundation (ASF) under one
-or more contributor license agreements.  See the NOTICE file
-distributed with this work for additional information
-regarding copyright ownership.  The ASF licenses this file
-to you under the Apache License, Version 2.0 (the
-"License"); you may not use this file except in compliance
-with the License.  You may obtain a copy of the License at
+Copyright IBM Corp. 2016 All Rights Reserved.
 
-  http://www.apache.org/licenses/LICENSE-2.0
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
 
-Unless required by applicable law or agreed to in writing,
-software distributed under the License is distributed on an
-"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-KIND, either express or implied.  See the License for the
-specific language governing permissions and limitations
-under the License.
+		 http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
 */
 
 package container
@@ -32,26 +29,11 @@ import (
 	"github.com/spf13/viper"
 
 	"github.com/fsouza/go-dockerclient"
-	"github.com/op/go-logging"
 	"github.com/hyperledger/fabric/core/chaincode/platforms"
 	cutil "github.com/hyperledger/fabric/core/container/util"
 	pb "github.com/hyperledger/fabric/protos"
+	"github.com/op/go-logging"
 )
-
-func newDockerClient() (client *docker.Client, err error) {
-	//QQ: is this ok using config properties here so deep ? ie, should we read these in main and stow them away ?
-	endpoint := viper.GetString("vm.endpoint")
-	vmLogger.Info("Creating VM with endpoint: %s", endpoint)
-	if viper.GetBool("vm.docker.tls.enabled") {
-		cert := viper.GetString("vm.docker.tls.cert.file")
-		key := viper.GetString("vm.docker.tls.key.file")
-		ca := viper.GetString("vm.docker.tls.ca.file")
-		client, err = docker.NewTLSClient(endpoint, cert, key, ca)
-	} else {
-		client, err = docker.NewClient(endpoint)
-	}
-	return
-}
 
 // VM implemenation of VM management functionality.
 type VM struct {
@@ -60,7 +42,7 @@ type VM struct {
 
 // NewVM creates a new VM instance.
 func NewVM() (*VM, error) {
-	client, err := newDockerClient()
+	client, err := cutil.NewDockerClient()
 	if err != nil {
 		return nil, err
 	}
@@ -105,9 +87,6 @@ func (vm *VM) BuildChaincodeContainer(spec *pb.ChaincodeSpec) ([]byte, error) {
 func GetChaincodePackageBytes(spec *pb.ChaincodeSpec) ([]byte, error) {
 	if spec == nil || spec.ChaincodeID == nil {
 		return nil, fmt.Errorf("invalid chaincode spec")
-	}
-	if spec.ChaincodeID.Name != "" {
-		return nil, fmt.Errorf("chaincode name exists")
 	}
 
 	inputbuf := bytes.NewBuffer(nil)
@@ -244,7 +223,7 @@ func (vm *VM) writeObccaPackage(tw *tar.Writer) error {
 	startTime := time.Now()
 
 	dockerFileContents := viper.GetString("peer.Dockerfile")
-	dockerFileContents = dockerFileContents + "WORKDIR membersrvc\nRUN go install && cp membersrvc.yaml $GOPATH/bin\n"
+	dockerFileContents = dockerFileContents + "WORKDIR ../membersrvc\nRUN go install && cp membersrvc.yaml $GOPATH/bin\n"
 	dockerFileSize := int64(len([]byte(dockerFileContents)))
 
 	tw.WriteHeader(&tar.Header{Name: "Dockerfile", Size: dockerFileSize, ModTime: startTime, AccessTime: startTime, ChangeTime: startTime})

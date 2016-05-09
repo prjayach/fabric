@@ -1,27 +1,24 @@
 /*
-Licensed to the Apache Software Foundation (ASF) under one
-or more contributor license agreements.  See the NOTICE file
-distributed with this work for additional information
-regarding copyright ownership.  The ASF licenses this file
-to you under the Apache License, Version 2.0 (the
-"License"); you may not use this file except in compliance
-with the License.  You may obtain a copy of the License at
+Copyright IBM Corp. 2016 All Rights Reserved.
 
-  http://www.apache.org/licenses/LICENSE-2.0
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
 
-Unless required by applicable law or agreed to in writing,
-software distributed under the License is distributed on an
-"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-KIND, either express or implied.  See the License for the
-specific language governing permissions and limitations
-under the License.
+		 http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
 */
 
 package core
 
 import (
 	"runtime"
-	"time"
+	"os"
 
 	"github.com/op/go-logging"
 	"github.com/spf13/viper"
@@ -59,15 +56,7 @@ func worker(id int, die chan struct{}) {
 
 // GetStatus reports the status of the server
 func (*ServerAdmin) GetStatus(context.Context, *google_protobuf.Empty) (*pb.ServerStatus, error) {
-	status := &pb.ServerStatus{Status: pb.ServerStatus_UNKNOWN}
-	die := make(chan struct{})
-	log.Debug("Creating %d workers", viper.GetInt("peer.workers"))
-	for i := 0; i < viper.GetInt("peer.workers"); i++ {
-		go worker(i, die)
-	}
-	runtime.Gosched()
-	<-time.After(1 * time.Millisecond)
-	close(die)
+	status := &pb.ServerStatus{Status: pb.ServerStatus_STARTED}
 	log.Debug("returning status: %s", status)
 	return status, nil
 }
@@ -83,5 +72,11 @@ func (*ServerAdmin) StartServer(context.Context, *google_protobuf.Empty) (*pb.Se
 func (*ServerAdmin) StopServer(context.Context, *google_protobuf.Empty) (*pb.ServerStatus, error) {
 	status := &pb.ServerStatus{Status: pb.ServerStatus_STOPPED}
 	log.Debug("returning status: %s", status)
+
+
+	pidFile := viper.GetString("peer.fileSystemPath") + "/peer.pid"
+	log.Debug("Remove pid file  %s", pidFile)
+	os.Remove(pidFile)
+	defer os.Exit(0)
 	return status, nil
 }

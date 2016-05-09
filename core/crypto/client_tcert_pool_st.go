@@ -1,20 +1,17 @@
 /*
-Licensed to the Apache Software Foundation (ASF) under one
-or more contributor license agreements.  See the NOTICE file
-distributed with this work for additional information
-regarding copyright ownership.  The ASF licenses this file
-to you under the Apache License, Version 2.0 (the
-"License"); you may not use this file except in compliance
-with the License.  You may obtain a copy of the License at
+Copyright IBM Corp. 2016 All Rights Reserved.
 
-  http://www.apache.org/licenses/LICENSE-2.0
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
 
-Unless required by applicable law or agreed to in writing,
-software distributed under the License is distributed on an
-"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-KIND, either express or implied.  See the License for the
-specific language governing permissions and limitations
-under the License.
+		 http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
 */
 
 package crypto
@@ -48,7 +45,7 @@ func (tCertPool *tCertPoolSingleThreadImpl) Start() (err error) {
 	if len(tCertDERs) == 0 {
 		tCertPool.client.debug("No more TCerts in cache! Load new from TCA.")
 
-		tCertPool.client.getTCertsFromTCA(tCertPool.client.conf.getTCertBathSize())
+		tCertPool.client.getTCertsFromTCA(tCertPool.client.conf.getTCertBatchSize())
 	} else {
 		tCertPool.client.debug("TCerts in cache found! Loading them...")
 
@@ -85,7 +82,7 @@ func (tCertPool *tCertPoolSingleThreadImpl) GetNextTCert() (tCert tCert, err err
 
 	if tCertPool.len <= 0 {
 		// Reload
-		if err := tCertPool.client.getTCertsFromTCA(tCertPool.client.conf.getTCertBathSize()); err != nil {
+		if err := tCertPool.client.getTCertsFromTCA(tCertPool.client.conf.getTCertBatchSize()); err != nil {
 
 			return nil, fmt.Errorf("Failed loading TCerts from TCA")
 		}
@@ -111,7 +108,7 @@ func (tCertPool *tCertPoolSingleThreadImpl) init(client *clientImpl) (err error)
 
 	tCertPool.client.debug("Init TCert Pool...")
 
-	tCertPool.tCerts = make([]tCert, tCertPool.client.conf.getTCertBathSize())
+	tCertPool.tCerts = make([]tCert, tCertPool.client.conf.getTCertBatchSize())
 	tCertPool.len = 0
 
 	return

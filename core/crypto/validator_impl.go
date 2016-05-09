@@ -1,30 +1,26 @@
 /*
-Licensed to the Apache Software Foundation (ASF) under one
-or more contributor license agreements.  See the NOTICE file
-distributed with this work for additional information
-regarding copyright ownership.  The ASF licenses this file
-to you under the Apache License, Version 2.0 (the
-"License"); you may not use this file except in compliance
-with the License.  You may obtain a copy of the License at
+Copyright IBM Corp. 2016 All Rights Reserved.
 
-  http://www.apache.org/licenses/LICENSE-2.0
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
 
-Unless required by applicable law or agreed to in writing,
-software distributed under the License is distributed on an
-"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-KIND, either express or implied.  See the License for the
-specific language governing permissions and limitations
-under the License.
+		 http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
 */
 
 package crypto
 
 import (
 	"crypto/ecdsa"
-	"crypto/x509"
 
 	"fmt"
-	"github.com/hyperledger/fabric/core/crypto/ecies"
+	"github.com/hyperledger/fabric/core/crypto/primitives"
 	"github.com/hyperledger/fabric/core/crypto/utils"
 	obc "github.com/hyperledger/fabric/protos"
 )
@@ -36,10 +32,8 @@ type validatorImpl struct {
 
 	isInitialized bool
 
-	enrollCerts map[string]*x509.Certificate
-
 	// Chain
-	chainPrivateKey ecies.PrivateKey
+	chainPrivateKey primitives.PrivateKey
 }
 
 // TransactionPreValidation verifies that the transaction is
@@ -170,22 +164,8 @@ func (validator *validatorImpl) init(name string, pwd []byte) error {
 		return err
 	}
 
-	// Initialize keystore
-	validator.debug("Init keystore...")
-	err := validator.initKeyStore()
-	if err != nil {
-		if err != utils.ErrKeyStoreAlreadyInitialized {
-			validator.error("Keystore already initialized.")
-		} else {
-			validator.error("Failed initiliazing keystore [%s].", err.Error())
-
-			return err
-		}
-	}
-	validator.debug("Init keystore...done.")
-
 	// Init crypto engine
-	err = validator.initCryptoEngine()
+	err := validator.initCryptoEngine()
 	if err != nil {
 		validator.error("Failed initiliazing crypto engine [%s].", err.Error())
 		return err
@@ -198,8 +178,6 @@ func (validator *validatorImpl) init(name string, pwd []byte) error {
 }
 
 func (validator *validatorImpl) initCryptoEngine() (err error) {
-	validator.enrollCerts = make(map[string]*x509.Certificate)
-
 	// Init chain publicKey
 	validator.chainPrivateKey, err = validator.eciesSPI.NewPrivateKey(
 		nil, validator.enrollChainKey.(*ecdsa.PrivateKey),

@@ -1,20 +1,17 @@
 /*
-Licensed to the Apache Software Foundation (ASF) under one
-or more contributor license agreements.  See the NOTICE file
-distributed with this work for additional information
-regarding copyright ownership.  The ASF licenses this file
-to you under the Apache License, Version 2.0 (the
-"License"); you may not use this file except in compliance
-with the License.  You may obtain a copy of the License at
+Copyright IBM Corp. 2016 All Rights Reserved.
 
-  http://www.apache.org/licenses/LICENSE-2.0
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
 
-Unless required by applicable law or agreed to in writing,
-software distributed under the License is distributed on an
-"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-KIND, either express or implied.  See the License for the
-specific language governing permissions and limitations
-under the License.
+		 http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
 */
 
 package ca
@@ -273,6 +270,33 @@ func createChaincodeInvocationForQuery(arguments []string, chaincodeHash string,
 	return invocationSpec
 }
 
+func getSecHelper() (crypto.Peer, error) {
+	var secHelper crypto.Peer
+	var err error
+	if viper.GetBool("security.enabled") {
+		enrollID := viper.GetString("security.enrollID")
+		enrollSecret := viper.GetString("security.enrollSecret")
+		if viper.GetBool("peer.validator.enabled") {
+			if err = crypto.RegisterValidator(enrollID, nil, enrollID, enrollSecret); nil != err {
+				return nil, err
+			}
+			secHelper, err = crypto.InitValidator(enrollID, nil)
+			if nil != err {
+				return nil, err
+			}
+		} else {
+			if err = crypto.RegisterPeer(enrollID, nil, enrollID, enrollSecret); nil != err {
+				return nil, err
+			}
+			secHelper, err = crypto.InitPeer(enrollID, nil)
+			if nil != err {
+				return nil, err
+			}
+		}
+	}
+	return secHelper, err
+}
+
 func startOpenchain(t *testing.T) error {
 
 	peerEndpoint, err := peer.GetPeerEndpoint()
@@ -308,12 +332,21 @@ func startOpenchain(t *testing.T) error {
 	// Register the Peer server
 	var peerServer *peer.PeerImpl
 
+	secHelper, err := getSecHelper()
+	if err != nil {
+		return err
+	}
+
+	secHelperFunc := func() crypto.Peer {
+		return secHelper
+	}
+
 	if viper.GetBool("peer.validator.enabled") {
 		t.Logf("Running as validating peer - installing consensus %s", viper.GetString("peer.validator.consensus"))
-		peerServer, _ = peer.NewPeerWithHandler(helper.NewConsensusHandler)
+		peerServer, _ = peer.NewPeerWithHandler(secHelperFunc, helper.NewConsensusHandler)
 	} else {
 		t.Log("Running as non-validating peer")
-		peerServer, _ = peer.NewPeerWithHandler(peer.NewPeerHandler)
+		peerServer, _ = peer.NewPeerWithHandler(secHelperFunc, peer.NewPeerHandler)
 	}
 	pb.RegisterPeerServer(grpcServer, peerServer)
 
@@ -322,13 +355,6 @@ func startOpenchain(t *testing.T) error {
 
 	// Register ChaincodeSupport server...
 	// TODO : not the "DefaultChain" ... we have to revisit when we do multichain
-
-	var secHelper crypto.Peer
-	if viper.GetBool("security.privacy") {
-		secHelper = peerServer.GetSecHelper()
-	} else {
-		secHelper = nil
-	}
 
 	registerChaincodeSupport(chaincode.DefaultChain, grpcServer, secHelper)
 
